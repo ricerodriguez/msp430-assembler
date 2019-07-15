@@ -25,6 +25,7 @@ class BabyAssembler:
         self.args = args
         self.list_cols = []
         self.orgs = []
+        self.orgs_i = []
         self.labels = {}
 
     def __init_cols(self):
@@ -53,11 +54,11 @@ class BabyAssembler:
 
     # First pass of the assembler
     def __first_pass(self,code):
-        last_org_i = 0
-        last_org = 0
-        counter = 0
-        first_org_i = 0
-        first_org = 0
+        # last_org_i = 0
+        # last_org = 0
+        # counter = 0
+        # first_org_i = 0
+        # first_org = 0
         for i,line in enumerate(code):
             line.strip()
             instruction = line.split()
@@ -80,22 +81,37 @@ class BabyAssembler:
                     self.col_4[i] = ''
                     self.col_5[i] = ''
                     # Store the last place the ORG was defined
-                    last_org_i = i
-                    last_org = self.col_1[last_org_i]
-                    if counter == 0:
-                        first_org_i = i
-                        first_org = self.col_1[first_org_i]
-                    counter += 1
+                    # last_org_i = i
+                    self.orgs_i.append(i)
+                    # last_org = self.col_1[last_org_i]
+                    self.orgs.append(self.col_1[i])
+                    # if counter == 0:
+                    #     first_org_i = i
+                    #     first_org = self.col_1[first_org_i]
+                    # counter += 1
                     
             except IndexError:
                 pass
+
+        for j in range(self.orgs_i[0]):
+            self.col_1[j] = self.orgs[0]
+
+        x=0
+        try:
+            for x in range(len(self.orgs_i)):
+                for k in range(self.orgs_i[x], self.orgs_i[x+1]):
+                    self.col_1[k] = self.orgs[x]
+                x+=1
+                print(x)
+        except IndexError:
+            pass
         # logger.debug(pprint.pformat(self.col_1))
             
-        for j in range(first_org_i):
-            # if self.col_1[j] is None:
-            self.col_1[j] = first_org
-            # else:
-                # continue
+        # for j in range(first_org_i):
+        #     # if self.col_1[j] is None:
+        #     self.col_1[j] = first_org
+        #     # else:
+        #         # continue
         logger.debug(pprint.pformat(self.col_1))
         # print('HELLO YES FIRST ORG WAS {} AT {}'.format(first_org,first_org_i))
         # logger.info('Addresses:\n{}'.format(pprint.pformat(self.col_1)))
@@ -105,27 +121,38 @@ class BabyAssembler:
             line.strip()
             instruction = line.split()
             try:
-                if instruction[0][0] == ';' or instruction[0] == 'ORG' or instruction[0] == '':
-                    # self.col_1[i] = self.col_1[i-1]
+                line = line.strip()
+                logger.debug('Stripped line: {}'.format(line))
+
+                if instruction[0] == 'ORG':
                     continue
+                
+                elif instruction[0][0] == ';' or len(instruction) == 0:
+                    if self.col_1[i-1] is None:
+                        continue
+                    else:
+                        logger.debug('Storing previous val of {} into old val {}'.format(self.col_1[i-1],self.col_1[i]))
+                        self.col_1[i] = self.col_1[i-1]
+                        continue
                 elif instruction[1] == 'EQU':
-                    # self.col_1[i] = self.col_1[i-1]
-                    continue
+                    if self.col_1[i-1] is None:
+                        continue
+                    else:
+                        logger.debug('Storing previous val of {} into old val {}'.format(self.col_1[i-1],self.col_1[i]))
+                        self.col_1[i] = self.col_1[i-1]
+                        continue
                 # Next try to find constants in RAM
                 elif instruction[1] == 'DW' or instruction[1] == 'DS':
-                    # logger.info('Last known address was {}'.format(last_org))
                     self.labels[instruction[0]] = self.col_1[i-1]
-                    # logger.debug(last_org)
+                    self.col_1[i-1] = '0x'+str(self.col_1[i-1])[2:].zfill(4)
+                    self.col_1[i] = hex(int(self.col_1[i-1],0)+2)
                     self.col_1[i] = '0x'+str(self.col_1[i])[2:].zfill(4)
-                    # logger.debug(self.col_1[i])
-                    self.col_1[i] = hex(int(self.col_1[i],0)+2)
 
                 # Next try to find constants in RAM
                 elif instruction[1] == 'DB':
                     # logger.info('Last known address was {}'.format(last_org))
                     self.labels[instruction[0]] = self.col_1[i-1]
                     self.col_1[i-1] = '0x'+str(self.col_1[i-1])[2:].zfill(4)
-                    # logger.debug(self.col_1[i])
                     self.col_1[i] = hex(int(self.col_1[i-1],0)+1)
                     self.col_1[i] = '0x'+str(self.col_1[i])[2:].zfill(4)
 
@@ -199,4 +226,4 @@ logger.debug('Set log level for console.')
 mspasm = BabyAssembler(args)
 mspasm.parse_asm()
 mspasm.write_list()
-
+print(mspasm.col_3[31].split()[0][0])
