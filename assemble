@@ -3,22 +3,12 @@ import sys
 import logging
 import argparse
 import pprint
-import pdb
+
 # Set up logging
 logging.basicConfig(filename='mspasm.log')
 logger = logging.getLogger('BABY ASSEMBLER')
 log_cmd = logging.StreamHandler()
 logger.addHandler(log_cmd)
-
-# Global Constants
-MAX_LINES = 16383               # FFFF - C000
-class Error(Exception):
-    pass
-
-class InvalidOpcodeError(Error):
-    def __init__(self,msg):
-        self.msg=msg
-        logger.error(msg)
 
 class BabyAssembler:
     def __init__(self,args):
@@ -95,22 +85,19 @@ class BabyAssembler:
     def __init_cols(self):
         self.col_0 = [None] * self.size         # Source File Line Number
         self.col_1 = [None] * self.size         # Addr
-        self.col_2 = [''] * self.size         # Encoded Instruction
-        self.col_3 = [''] * self.size         # Opcode
-        self.col_4 = [''] * self.size         # SRC
-        self.col_5 = [''] * self.size         # DST
+        self.col_2 = [''] * self.size           # Encoded Instruction
+        self.col_3 = [''] * self.size           # Opcode
+        self.col_4 = [''] * self.size           # SRC
+        self.col_5 = [''] * self.size           # DST
     
 
     def __get_size(self,code):
         logger.debug('Getting the number of lines of code.')
         for i,line in enumerate(code):
-            # logger.debug('Looking for the END directive...')
             try:
-                # logger.info(line.strip().split()[0])
                 if line.strip().split()[0] == 'END':
                     logger.debug('Found the END directive.')
                     self.size = i
-                    # return self.size
                 else:
                     continue
             except IndexError:
@@ -136,11 +123,9 @@ class BabyAssembler:
                     # right of this for assembler directives, so fill
                     # with whitespace
                     self.col_2[i] = ''
-                    # self.col_3[i] = line.strip()
                     self.col_4[i] = ''
                     self.col_5[i] = ''
                     # Store the last place the ORG was defined
-                    # last_org_i = i
                     self.orgs_i.append(i)
                     self.orgs.append(self.col_1[i])
                     
@@ -156,7 +141,6 @@ class BabyAssembler:
                 for k in range(self.orgs_i[x], self.orgs_i[x+1]):
                     self.col_1[k] = self.orgs[x]
                 x+=1
-                # print(x)
         except IndexError:
             pass
 
@@ -179,11 +163,6 @@ class BabyAssembler:
                             self.col_1[i] = self.col_1[i-1]
                             continue
                     else:
-                        # if not(i==0):
-                        #     logger.debug('Storing previous val of {} into old val {} (line {})'.format(self.col_1[i-1],self.col_1[i]),i)
-                        #     self.col_1[i] = self.col_1[i-1]
-                        #     continue
-                        # else:
                         logger.debug('No found previous value. Continuing.')
                         continue
                     
@@ -233,7 +212,6 @@ class BabyAssembler:
                                 dupkey = 'err'+instruction[0]
                                 self.labels[dupkey] = self.col_1[i-1]
                                 was_label = True
-                        # continue
                     else:
                         # Must be a label?
                         logger.debug('I guess this is a label?')
@@ -244,7 +222,6 @@ class BabyAssembler:
                             dupkey = 'err'+instruction[0]
                             self.labels[dupkey] = self.col_1[0]
                             was_label = True
-                        # self.labels[instruction[0]] = self.col_1[0]
                         continue
 
                 if not (self.__convert_to_opcode(instruction[1]) is None):
@@ -260,62 +237,17 @@ class BabyAssembler:
                         continue
                 # Next try to find constants in RAM
                 elif instruction[1] == 'DW':
-                    # if not (i==0):
-                    #     if self.labels.get(instruction[0]) is None:
-                    #         self.labels[instruction[0]] = self.col_1[i-1]
-                    #         was_label = True
-                    #     else:
-                    #         if self.labels.get(instruction[0]) == self.col_1[i-1]:
-                    #             pass
-                    #         else:
-                    #             logger.debug('Found duplicate label {} (line {})'.format(instruction[0],i))
-                    #             dupkey = 'err'+instruction[0]
-                    #             self.labels[dupkey] = self.col_1[i-1]
-                    #             was_label = True
                     self.col_1[i-1] = '0x'+str(self.col_1[i-1])[2:].zfill(4)
                     self.col_1[i] = hex(int(self.col_1[i-1],0)+2)
                     self.col_1[i] = '0x'+str(self.col_1[i])[2:].zfill(4)
 
                 elif instruction[1] == 'DS':
-                    # self.labels[instruction[0]] = self.col_1[i-1]
-                    # if not (i==0):
-                    #     if self.labels.get(instruction[0]) is None:
-                    #         self.labels[instruction[0]] = self.col_1[i-1]
-                    #         was_label = True
-                    #     else:
-                    #         if self.labels.get(instruction[0]) == self.col_1[i-1]:
-                    #             pass
-                    #         else:
-                    #             logger.debug('Found duplicate label {} (line {})'.format(instruction[0],i))
-                    #             dupkey = 'err'+instruction[0]
-                    #             self.labels[dupkey] = self.col_1[i-1]
-                    #             was_label = True
-                    #         # dupkey = 'err'+instruction[0]
-                    #         # self.labels[dupkey] = self.col_1[i-1]
-                    #         # was_label = True
                     self.col_1[i-1] = '0x'+str(self.col_1[i-1])[2:].zfill(4)
                     self.col_1[i] = hex(int(self.col_1[i-1],0)+int(instruction[2]))
                     self.col_1[i] = '0x'+str(self.col_1[i])[2:].zfill(4)
 
                 # Next try to find constants in RAM
                 elif instruction[1] == 'DB':
-                    # # logger.info('Last known address was {}'.format(last_org))
-                    # # self.labels[instruction[0]] = self.col_1[i-1]
-                    # if not (i==0):
-                    #     if self.labels.get(instruction[0]) is None:
-                    #         self.labels[instruction[0]] = self.col_1[i-1]
-                    #         was_label = True
-                    #     else:
-                    #         if self.labels.get(instruction[0]) == self.col_1[i-1]:
-                    #             pass
-                    #         else:
-                    #             logger.debug('Found duplicate label {} (line {})'.format(instruction[0],i))
-                    #             dupkey = 'err'+instruction[0]
-                    #             self.labels[dupkey] = self.col_1[i-1]
-                    #             was_label = True
-                    #         # dupkey = 'err'+instruction[0]
-                    #         # self.labels[dupkey] = self.col_1[i-1]
-                    #         # was_label = True
                     self.col_1[i-1] = '0x'+str(self.col_1[i-1])[2:].zfill(4)
                     self.col_1[i] = hex(int(self.col_1[i-1],0)+1)
                     self.col_1[i] = '0x'+str(self.col_1[i])[2:].zfill(4)
@@ -345,10 +277,6 @@ class BabyAssembler:
                 else:
                     logger.critical('Could not parse through instruction: "%s" at line %s' % (instruction,i))
                     exit()
-                # if i==30:
-                #     print('here')
-                #     exit()
-                # pass
 
             except ValueError:
                 pass
@@ -373,18 +301,30 @@ class BabyAssembler:
     def write_list(self):
         f_lines = ''
         symb_tab = '%-50s %-50s\n' %('Label','Value')
+        err_labels = {}
+        symb_err = '{:^55}\n'.format('ERRORS:')
+        symb_err += '%-50s %-50s\n' %('Duplicate Label','Value')
         try:
             for i in range(self.size):
                 addr = self.col_1[i][2:].upper()
                 f_lines += '%-10s %-10s %-10s %-30s\n' % (i,addr,self.col_2[i],self.col_3[i])
-            # logger.info('Flines:\n{}'.format(pprint.pformat(f_lines)))
-            for label,addr in self.labels.items():
+            for label,addr in sorted(self.labels.items()):
                 if not label.startswith('err'):
                     pretty_addr = addr[2:].upper()
                     symb_tab += '%-50s %-50s\n' % (label,pretty_addr)
                 else:
-                    pretty_label = label[3:].upper()
-                    symb_tab += '%-50s %-50s\n' % ('ERROR: Duplicate Label',pretty_label)
+                    logger.debug('Found duplicate {}'.format(label[3:]))
+                    err_labels[label] = addr[2:].upper()
+                    # logger.debug(err_labels[label])
+                    continue
+            if err_labels:
+                for err,val in sorted(err_labels.items()):                                    
+                    label = err[3:]
+                    addr = val[2:].upper()
+                    symb_err += '%-50s %-50s\n' % (label,addr)
+            else:
+                pass
+
         except TypeError:
             logger.warning('Column contains NoneType')
             pass
@@ -394,6 +334,8 @@ class BabyAssembler:
                 fname = self.args.asm[:-4]+'.list'
                 with open(fname,'w+') as f:
                     lines = f_lines+'\n\n\n\n'+symb_tab
+                    if err_labels:
+                        lines += '\n\n'+symb_err
                     f.writelines(lines)
                 logger.debug('Wrote to file')
             except FileNotFoundError:
@@ -402,6 +344,8 @@ class BabyAssembler:
             try:
                 with open(self.args.list_file,'w+') as f:
                     lines = f_lines+'\n\n\n\n'+symb_tab
+                    if err_labels:
+                        lines += '\n\n'+symb_err
                     f.writelines(lines)
             except FileNotFoundError:
                 logger.critical('Path to list does not exist')
