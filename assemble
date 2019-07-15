@@ -166,13 +166,7 @@ class BabyAssembler:
             line = line.replace(':','')
             instruction = line.split()
             try:
-                # logger.info('Operation {} is {} in opcode bits'.format(instruction[0],self.__convert_to_opcode(instruction[0])))
                 line = line.strip()
-                # if i==30:
-                #     print(bool(not instruction))
-                #     exit()
-                # logger.debug('Stripped line: {}'.format(line))
-
                 # First things first. Is this an ORG, blank line, or opcode?
                 if not instruction:
                     logger.debug('Found whitespace at line {}'.format(i))
@@ -181,6 +175,7 @@ class BabyAssembler:
                             logger.warning('Previous address was None')
                             continue
                         else:
+                            logger.debug('Extending the address counter {} on this line {}'.format(self.col_1[i-1],i))
                             self.col_1[i] = self.col_1[i-1]
                             continue
                     else:
@@ -194,6 +189,9 @@ class BabyAssembler:
                     
                 elif instruction[0] == 'ORG':
                     continue
+
+                elif instruction[0] == 'END':
+                    break
 
                 elif not self.__convert_to_opcode(instruction[0]) is None:
                     self.col_1[i] = hex(int(str(self.col_1[i-1]),0)+2)
@@ -225,6 +223,7 @@ class BabyAssembler:
                         if self.labels.get(instruction[0]) is None:
                             logger.debug('Found new label: {} (line {})'.format(instruction[0],i))
                             self.labels[instruction[0]] = self.col_1[i-1]
+                            self.col_1[i] = self.col_1[i-1]
                             was_label = True
                         else:
                             if self.labels.get(instruction[0]) == self.col_1[i-1]:
@@ -261,62 +260,62 @@ class BabyAssembler:
                         continue
                 # Next try to find constants in RAM
                 elif instruction[1] == 'DW':
-                    if not (i==0):
-                        if self.labels.get(instruction[0]) is None:
-                            self.labels[instruction[0]] = self.col_1[i-1]
-                            was_label = True
-                        else:
-                            if self.labels.get(instruction[0]) == self.col_1[i-1]:
-                                pass
-                            else:
-                                logger.debug('Found duplicate label {} (line {})'.format(instruction[0],i))
-                                dupkey = 'err'+instruction[0]
-                                self.labels[dupkey] = self.col_1[i-1]
-                                was_label = True
+                    # if not (i==0):
+                    #     if self.labels.get(instruction[0]) is None:
+                    #         self.labels[instruction[0]] = self.col_1[i-1]
+                    #         was_label = True
+                    #     else:
+                    #         if self.labels.get(instruction[0]) == self.col_1[i-1]:
+                    #             pass
+                    #         else:
+                    #             logger.debug('Found duplicate label {} (line {})'.format(instruction[0],i))
+                    #             dupkey = 'err'+instruction[0]
+                    #             self.labels[dupkey] = self.col_1[i-1]
+                    #             was_label = True
                     self.col_1[i-1] = '0x'+str(self.col_1[i-1])[2:].zfill(4)
                     self.col_1[i] = hex(int(self.col_1[i-1],0)+2)
                     self.col_1[i] = '0x'+str(self.col_1[i])[2:].zfill(4)
 
                 elif instruction[1] == 'DS':
                     # self.labels[instruction[0]] = self.col_1[i-1]
-                    if not (i==0):
-                        if self.labels.get(instruction[0]) is None:
-                            self.labels[instruction[0]] = self.col_1[i-1]
-                            was_label = True
-                        else:
-                            if self.labels.get(instruction[0]) == self.col_1[i-1]:
-                                pass
-                            else:
-                                logger.debug('Found duplicate label {} (line {})'.format(instruction[0],i))
-                                dupkey = 'err'+instruction[0]
-                                self.labels[dupkey] = self.col_1[i-1]
-                                was_label = True
-                            # dupkey = 'err'+instruction[0]
-                            # self.labels[dupkey] = self.col_1[i-1]
-                            # was_label = True
+                    # if not (i==0):
+                    #     if self.labels.get(instruction[0]) is None:
+                    #         self.labels[instruction[0]] = self.col_1[i-1]
+                    #         was_label = True
+                    #     else:
+                    #         if self.labels.get(instruction[0]) == self.col_1[i-1]:
+                    #             pass
+                    #         else:
+                    #             logger.debug('Found duplicate label {} (line {})'.format(instruction[0],i))
+                    #             dupkey = 'err'+instruction[0]
+                    #             self.labels[dupkey] = self.col_1[i-1]
+                    #             was_label = True
+                    #         # dupkey = 'err'+instruction[0]
+                    #         # self.labels[dupkey] = self.col_1[i-1]
+                    #         # was_label = True
                     self.col_1[i-1] = '0x'+str(self.col_1[i-1])[2:].zfill(4)
                     self.col_1[i] = hex(int(self.col_1[i-1],0)+int(instruction[2]))
                     self.col_1[i] = '0x'+str(self.col_1[i])[2:].zfill(4)
 
                 # Next try to find constants in RAM
                 elif instruction[1] == 'DB':
-                    # logger.info('Last known address was {}'.format(last_org))
-                    # self.labels[instruction[0]] = self.col_1[i-1]
-                    if not (i==0):
-                        if self.labels.get(instruction[0]) is None:
-                            self.labels[instruction[0]] = self.col_1[i-1]
-                            was_label = True
-                        else:
-                            if self.labels.get(instruction[0]) == self.col_1[i-1]:
-                                pass
-                            else:
-                                logger.debug('Found duplicate label {} (line {})'.format(instruction[0],i))
-                                dupkey = 'err'+instruction[0]
-                                self.labels[dupkey] = self.col_1[i-1]
-                                was_label = True
-                            # dupkey = 'err'+instruction[0]
-                            # self.labels[dupkey] = self.col_1[i-1]
-                            # was_label = True
+                    # # logger.info('Last known address was {}'.format(last_org))
+                    # # self.labels[instruction[0]] = self.col_1[i-1]
+                    # if not (i==0):
+                    #     if self.labels.get(instruction[0]) is None:
+                    #         self.labels[instruction[0]] = self.col_1[i-1]
+                    #         was_label = True
+                    #     else:
+                    #         if self.labels.get(instruction[0]) == self.col_1[i-1]:
+                    #             pass
+                    #         else:
+                    #             logger.debug('Found duplicate label {} (line {})'.format(instruction[0],i))
+                    #             dupkey = 'err'+instruction[0]
+                    #             self.labels[dupkey] = self.col_1[i-1]
+                    #             was_label = True
+                    #         # dupkey = 'err'+instruction[0]
+                    #         # self.labels[dupkey] = self.col_1[i-1]
+                    #         # was_label = True
                     self.col_1[i-1] = '0x'+str(self.col_1[i-1])[2:].zfill(4)
                     self.col_1[i] = hex(int(self.col_1[i-1],0)+1)
                     self.col_1[i] = '0x'+str(self.col_1[i])[2:].zfill(4)
@@ -381,9 +380,11 @@ class BabyAssembler:
             # logger.info('Flines:\n{}'.format(pprint.pformat(f_lines)))
             for label,addr in self.labels.items():
                 if not label.startswith('err'):
-                    symb_tab += '%-50s %-50s\n' % (label,addr)
+                    pretty_addr = addr[2:].upper()
+                    symb_tab += '%-50s %-50s\n' % (label,pretty_addr)
                 else:
-                    symb_tab += '%-50s %-50s\n' % ('ERROR: Duplicate Label',label[3:])
+                    pretty_label = label[3:].upper()
+                    symb_tab += '%-50s %-50s\n' % ('ERROR: Duplicate Label',pretty_label)
         except TypeError:
             logger.warning('Column contains NoneType')
             pass
