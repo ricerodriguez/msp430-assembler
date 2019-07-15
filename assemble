@@ -3,7 +3,7 @@ import sys
 import logging
 import argparse
 import pprint
-
+import pdb
 # Set up logging
 logging.basicConfig(filename='mspasm.log')
 logger = logging.getLogger('BABY ASSEMBLER')
@@ -27,6 +27,70 @@ class BabyAssembler:
         self.orgs = []
         self.orgs_i = []
         self.labels = {}
+        self.opcodes_1 = {
+            'mov'    : '0100',
+            'add'    : '0101',
+            'addc'   : '0110',
+            'subc'   : '0111',
+            'sub'    : '1000',
+            'cmp'    : '1001',
+            'dadd'   : '1010',
+            'bit'    : '1011',
+            'bic'    : '1100',
+            'bis'    : '1101',
+            'xor'    : '1110',
+            'and'    : '1111'
+        }
+        
+        self.opcodes_2 = {
+            'rrc'    : '0001' + '0000' + '0000',
+            'rrc.b'  : '0001' + '0000' + '0000',
+            'swpb'   : '0001' + '0000' + '1000',  
+            'rra'    : '0001' + '0001' + '0000', 
+            'rra.b'  : '0001' + '0001' + '0100', 
+            'sxt'    : '0001' + '0001' + '1000', 
+            'push'   : '0001' + '0010' + '0000',
+            'push.b' : '0001' + '0010' + '0100',
+            'call'   : '0001' + '0010' + '1000',
+            'reti'   : '0001' + '0011' + '0000'
+        }
+            
+            
+        self.opcodes_3 = {
+            'jne'    : '00100000',
+            'jnz'    : '00100000',
+            'jeq'    : '00100100',
+            'jz'     : '00100100',
+            'jnc'    : '00101000',
+            'jc'     : '00101100',
+            'jn'     : '00110000',
+            'jge'    : '00110100',
+            'jl'     : '00111000',
+            'jmp'    : '00111100'
+        }
+
+        self.opcodes_all = [self.opcodes_1, self.opcodes_2, self.opcodes_3]
+
+
+    def __convert_to_opcode(self,instruction):
+        result = None
+        for opcodes in self.opcodes_all:
+            result = opcodes.get(instruction)
+            if result is None:
+                continue
+            else:
+                return result
+        # Got to here. If instruction isn't in there, maybe it's
+        # because it's a .b or .w
+        for opcodes in self.opcodes_all:
+            result = opcodes.get(instruction[:-2])
+            if result is None:
+                continue
+            else:
+                return result
+        # Failed both tests. Probably not an opcode
+        return result
+        
 
     def __init_cols(self):
         self.col_0 = [None] * self.size         # Source File Line Number
@@ -54,11 +118,6 @@ class BabyAssembler:
 
     # First pass of the assembler
     def __first_pass(self,code):
-        # last_org_i = 0
-        # last_org = 0
-        # counter = 0
-        # first_org_i = 0
-        # first_org = 0
         for i,line in enumerate(code):
             line.strip()
             instruction = line.split()
@@ -83,12 +142,7 @@ class BabyAssembler:
                     # Store the last place the ORG was defined
                     # last_org_i = i
                     self.orgs_i.append(i)
-                    # last_org = self.col_1[last_org_i]
                     self.orgs.append(self.col_1[i])
-                    # if counter == 0:
-                    #     first_org_i = i
-                    #     first_org = self.col_1[first_org_i]
-                    # counter += 1
                     
             except IndexError:
                 pass
@@ -102,43 +156,75 @@ class BabyAssembler:
                 for k in range(self.orgs_i[x], self.orgs_i[x+1]):
                     self.col_1[k] = self.orgs[x]
                 x+=1
-                print(x)
+                # print(x)
         except IndexError:
             pass
-        # logger.debug(pprint.pformat(self.col_1))
-            
-        # for j in range(first_org_i):
-        #     # if self.col_1[j] is None:
-        #     self.col_1[j] = first_org
-        #     # else:
-        #         # continue
-        logger.debug(pprint.pformat(self.col_1))
-        # print('HELLO YES FIRST ORG WAS {} AT {}'.format(first_org,first_org_i))
-        # logger.info('Addresses:\n{}'.format(pprint.pformat(self.col_1)))
 
     def __second_pass(self,code):
         for i,line in enumerate(code):
             line.strip()
             instruction = line.split()
             try:
+                # logger.info('Operation {} is {} in opcode bits'.format(instruction[0],self.__convert_to_opcode(instruction[0])))
                 line = line.strip()
-                logger.debug('Stripped line: {}'.format(line))
+                # if i==30:
+                #     print(bool(not instruction))
+                #     exit()
+                # logger.debug('Stripped line: {}'.format(line))
 
+                # First things first. Is this an ORG, blank line, or opcode?
                 if instruction[0] == 'ORG':
                     continue
+
+                elif not self.__convert_to_opcode(instruction[0]) is None:
+                    self.col_1[i] = hex(int(str(self.col_1[i-1]),0)+2)
+                    self.col_1[i] = '0x'+str(self.col_1[i])[2:].zfill(4)
                 
-                elif instruction[0][0] == ';' or len(instruction) == 0:
-                    if self.col_1[i-1] is None:
-                        continue
+                elif not instruction or instruction[0][0] == ';':
+                    if not(i==0):
+                        if self.col_1[i-1] is None:
+                            logger.warning('Previous address was None')
+                            continue
+                        else:
+                            self.col_1[i] = self.col_1[i-1]
+                            continue
                     else:
-                        logger.debug('Storing previous val of {} into old val {}'.format(self.col_1[i-1],self.col_1[i]))
-                        self.col_1[i] = self.col_1[i-1]
+                        if not(i==0):
+                            logger.debug('Storing previous val of {} into old val {} (line {})'.format(self.col_1[i-1],self.col_1[i]),i)
+                            self.col_1[i] = self.col_1[i-1]
+                            continue
+                        else:
+                            logger.debug('No found previous value. Continuing.')
+                            continue
+                    
+                # elif instruction[0][0] == ';':
+                #     if not(i==0):
+                #         if self.col_1[i-1] is None:
+                #             continue
+                #         else:
+                #             logger.debug('Storing previous val of {} into old val {} (line {})'.format(self.col_1[i-1],self.col_1[i],i))
+                #             self.col_1[i] = self.col_1[i-1]
+                #             continue
+                # If the first part of the instruction did not match any of these then
+                # it must be a label
+                else:
+                    if not i==0:
+                        self.labels[instruction[0]] = self.col_1[i-1]
+                    else:
                         continue
+                    # self.col_1[i-1] = '0x'+str(self.col_1[i-1])[2:].zfill(4)
+                    # self.col_1[i] = hex(int(self.col_1[i-1],0)+2)
+                    # self.col_1[i] = '0x'+str(self.col_1[i])[2:].zfill(4)
+
+                if not self.__convert_to_opcode(instruction[1]) is None:
+                    self.col_1[i] = hex(int(str(self.col_1[i-1]),0)+2)
+                    self.col_1[i] = '0x'+str(self.col_1[i])[2:].zfill(4)
+
                 elif instruction[1] == 'EQU':
                     if self.col_1[i-1] is None:
                         continue
                     else:
-                        logger.debug('Storing previous val of {} into old val {}'.format(self.col_1[i-1],self.col_1[i]))
+                        logger.debug('Storing previous val of {} into old val {} (line {})'.format(self.col_1[i-1],self.col_1[i],i))
                         self.col_1[i] = self.col_1[i-1]
                         continue
                 # Next try to find constants in RAM
@@ -157,11 +243,24 @@ class BabyAssembler:
                     self.col_1[i] = '0x'+str(self.col_1[i])[2:].zfill(4)
 
                 else:
-                    self.col_1[i] = hex(int(str(self.col_1[i-1]),0)+2)
-                    self.col_1[i] = '0x'+str(self.col_1[i])[2:].zfill(4)
+                    if self.col_1[i-1] is None:
+                        continue
+                    else:
+                        logger.debug('No match found for instruction {} (line {})'.format(instruction[0],i))
+                        logger.debug('Storing previous val of {} into old val {}'.format(self.col_1[i-1],self.col_1[i]))
+                        self.col_1[i] = self.col_1[i-1]
+                        continue
 
             except IndexError:
-                pass
+                if not instruction:
+                    pass
+                else:
+                    logger.critical('Could not parse through instruction: "%s" at line %s' % (instruction,i))
+                    exit()
+                # if i==30:
+                #     print('here')
+                #     exit()
+                # pass
 
             except ValueError:
                 pass
