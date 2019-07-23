@@ -17,6 +17,13 @@ class BabyAssembler:
         self.orgs = []
         self.orgs_i = []
         self.labels = {}
+        self.asm_directives = {
+            'ORG'    : None,
+            'DW'     : 2,
+            'DB'     : 1,
+            'DS'     : None,
+            'EQU'    : 0
+        }
         self.opcodes_1 = {
             'mov'    : '0100',
             'add'    : '0101',
@@ -138,26 +145,6 @@ class BabyAssembler:
             instruction = line.split()
             try:
                 self.col_3[i] = line.strip()
-                # # Before anything, check if last thing was an org
-                # if last_was_org:
-                #     self.col_1[i] = self.orgs[-1]
-                #     last_was_org = False
-                #     continue
-                # First check if this is whitespace
-                # if not instruction:
-                #     logger.debug('Found whitespace at line {}'.format(i))
-                #     if not(i==0):
-                #         if self.col_1[i-1] is None:
-                #             logger.warning('Previous address was None')
-                #             continue
-                #         else:
-                #             logger.debug('Extending the address counter {} on this line {}'.format(self.col_1[i-1],i))
-                #             self.col_1[i] = self.col_1[i-1]
-                #             continue
-                #     else:
-                #         logger.debug('No found previous value. Continuing.')
-                #         continue
-
                 # Now check if the last address was defined
                 if not (i==0):
                     logger.debug('Checking if last address was defined')
@@ -193,25 +180,30 @@ class BabyAssembler:
                     # Store the last place the ORG was defined
                     self.orgs_i.append(i)
                     self.orgs.append(self.col_1[i])
+                    continue
                     
                 elif not self.__convert_to_opcode(instruction[0]) is None:
                     logger.debug('Recognized an opcode ({}). Not encoding it for the first pass.'.format(instruction[0]))
                     # Now to determine if this was emulated or not
                     tmp = self.__convert_to_opcode(instruction[0])
-                    if len(tmp) > 1:
+                    offset = 0
+                    self.col_1[i+1] = hex(int(str(self.col_1[i]),0)+2)
+                    # logger.critical('Immediately added 2 before processing further.')
+                    # logger.critical('Next address is: {}'.format(self.col_1[i+1]))
+                    if isinstance(tmp,list):
+                        # logger.critical('{} is an emulated instruction: {}'.format(instruction[0],tmp))
                         # This is an emulated instruction
-                        # Add by however much is predetermined
-                        self.col_1[i+1] = hex(int(str(self.col_1[i]),0)+int(tmp[0]))
-                        self.col_1[i+1] = '0x'+str(self.col_1[i])[2:].zfill(4)
-                        # We're done here.
-                        continue
+                        offset = int(tmp[0])
                         
                     # Now to determine how much we need to increment the address counter by
                     if '#0x' in instruction:
-                        self.col_1[i+1] = hex(int(str(self.col_1[i]),0)+2)
+                        self.col_1[i+1] = hex(int(str(self.col_1[i+1]),0)+2)
                     if '&' in instruction:
-                        self.col_1[i+1] = hex(int(str(self.col_1[i]),0)+2)                        
-                    self.col_1[i] = '0x'+str(self.col_1[i])[2:].zfill(4)
+                        self.col_1[i+1] = hex(int(str(self.col_1[i+1]),0)+2)
+                        
+                    self.col_1[i+1] = hex(int(str(self.col_1[i+1]),0)+offset)
+                    self.col_1[i+1] = '0x'+str(self.col_1[i+1])[2:].zfill(4)
+                    continue
                 
                 elif instruction[0][0] == ';':
                     logger.debug('Found comment at line {}'.format(i))
@@ -295,7 +287,7 @@ class BabyAssembler:
                             logger.warning('Got to the else, previous address was None.')
                             continue
                         else:
-                            logger.debug('No match found for {}, assuming it\'s just be whitespace.'.format(instruction))
+                            logger.debug('No match found for {}, assuming it\'s just whitespace.'.format(instruction))
                             self.col_1[i+1] = self.col_1[i]
                             
                     else:
@@ -314,156 +306,11 @@ class BabyAssembler:
 
         logger.info(pprint.pformat(self.labels))
 
-        # for j in range(self.orgs_i[0]):
-        #     self.col_1[j] = self.orgs[0]
-
-        # x=0
-        # try:
-        #     for x in range(len(self.orgs_i)):
-        #         for k in range(self.orgs_i[x], self.orgs_i[x+1]):
-        #             self.col_1[k] = self.orgs[x]
-        #         x+=1
-        # except IndexError:
-        #     pass
-
     # def __second_pass(self,code):
     #     was_label = False
     #     for i,line in enumerate(code):
     #         line = line.replace(':','')
     #         instruction = line.split()
-    #         try:
-    #             line = line.strip()
-    #             # First things first. Is this an ORG, blank line, or opcode?
-    #             if not instruction:
-    #                 logger.debug('Found whitespace at line {}'.format(i))
-    #                 if not(i==0):
-    #                     if self.col_1[i-1] is None:
-    #                         logger.warning('Previous address was None')
-    #                         continue
-    #                     else:
-    #                         logger.debug('Extending the address counter {} on this line {}'.format(self.col_1[i-1],i))
-    #                         self.col_1[i] = self.col_1[i-1]
-    #                         continue
-    #                 else:
-    #                     logger.debug('No found previous value. Continuing.')
-    #                     continue
-                    
-    #             elif instruction[0] == 'ORG':
-    #                 continue
-
-    #             elif instruction[0] == 'END':
-    #                 break
-
-    #             elif not self.__convert_to_opcode(instruction[0]) is None:
-    #                 self.col_1[i] = hex(int(str(self.col_1[i-1]),0)+2)
-    #                 self.col_1[i] = '0x'+str(self.col_1[i])[2:].zfill(4)
-                
-    #             elif instruction[0][0] == ';':
-    #                 logger.debug('Found comment at line {}'.format(i))
-    #                 if not(i==0):
-    #                     if self.col_1[i-1] is None:
-    #                         logger.warning('Previous address was None')
-    #                         continue
-    #                     else:
-    #                         self.col_1[i] = self.col_1[i-1]
-    #                         continue
-    #                 else:
-    #                     if not(i==0):
-    #                         logger.debug('Storing previous val of {} into old val {} (line {})'.format(self.col_1[i-1],self.col_1[i]),i)
-    #                         self.col_1[i] = self.col_1[i-1]
-    #                         continue
-    #                     else:
-    #                         logger.debug('No found previous value. Continuing.')
-    #                         continue
-                    
-    #             # If the first part of the instruction did not match any of these then
-    #             # it must be a label
-    #             else:
-    #                 logger.debug('No other matches so far for instruction {}'.format(instruction[0]))
-    #                 if not (i==0):
-    #                     if self.labels.get(instruction[0]) is None:
-    #                         logger.debug('Found new label: {} (line {})'.format(instruction[0],i))
-    #                         self.labels[instruction[0]] = self.col_1[i-1]
-    #                         self.col_1[i] = self.col_1[i-1]
-    #                         was_label = True
-    #                     else:
-    #                         if self.labels.get(instruction[0]) == self.col_1[i-1]:
-    #                             pass
-    #                         else:
-    #                             logger.debug('Found duplicate label {} (line {})'.format(instruction[0],i))
-    #                             dupkey = 'err'+instruction[0]
-    #                             self.labels[dupkey] = self.col_1[i-1]
-    #                             was_label = True
-    #                 else:
-    #                     # Must be a label?
-    #                     logger.debug('I guess this is a label?')
-    #                     if self.labels.get(instruction[0]) is None:
-    #                         self.labels[instruction[0]] = self.col_1[0]
-    #                         was_label = True
-    #                     else:
-    #                         dupkey = 'err'+instruction[0]
-    #                         self.labels[dupkey] = self.col_1[0]
-    #                         was_label = True
-    #                     continue
-
-    #             if not (self.__convert_to_opcode(instruction[1]) is None):
-    #                 self.col_1[i] = hex(int(str(self.col_1[i-1]),0)+2)
-    #                 self.col_1[i] = '0x'+str(self.col_1[i])[2:].zfill(4)
-
-    #             elif instruction[1] == 'EQU':
-    #                 if self.col_1[i-1] is None:
-    #                     continue
-    #                 else:
-    #                     logger.debug('Storing previous val of {} into old val {} (line {})'.format(self.col_1[i-1],self.col_1[i],i))
-    #                     self.col_1[i] = self.col_1[i-1]
-    #                     continue
-    #             # Next try to find constants in RAM
-    #             elif instruction[1] == 'DW':
-    #                 self.col_1[i-1] = '0x'+str(self.col_1[i-1])[2:].zfill(4)
-    #                 self.col_1[i] = hex(int(self.col_1[i-1],0)+2)
-    #                 self.col_1[i] = '0x'+str(self.col_1[i])[2:].zfill(4)
-
-    #             elif instruction[1] == 'DS':
-    #                 self.col_1[i-1] = '0x'+str(self.col_1[i-1])[2:].zfill(4)
-    #                 self.col_1[i] = hex(int(self.col_1[i-1],0)+int(instruction[2]))
-    #                 self.col_1[i] = '0x'+str(self.col_1[i])[2:].zfill(4)
-
-    #             # Next try to find constants in RAM
-    #             elif instruction[1] == 'DB':
-    #                 self.col_1[i-1] = '0x'+str(self.col_1[i-1])[2:].zfill(4)
-    #                 self.col_1[i] = hex(int(self.col_1[i-1],0)+1)
-    #                 self.col_1[i] = '0x'+str(self.col_1[i])[2:].zfill(4)
-
-    #             else:
-    #                 if not(i==0):
-    #                     if self.col_1[i-1] is None:
-    #                         logger.warning('Got to the else, previous address was None.')
-    #                         continue
-    #                     else:
-    #                         logger.debug('No match found for {}, assuming it\'s just be whitespace.'.format(instruction))
-    #                         self.col_1[i] = self.col_1[i-1]
-                            
-    #                 else:
-    #                     logger.debug('Must be whitespace on the first line.')
-    #                     logger.debug('No match found for instruction {} (line {})'.format(instruction[0],i))
-    #                     logger.debug('Storing previous val of {} into old val {}'.format(self.col_1[i-1],self.col_1[i]))
-    #                     self.col_1[i] = self.col_1[i-1]
-    #                     continue
-    #             was_label=False
-
-    #         except IndexError:
-    #             if not instruction:
-    #                 pass
-    #             elif was_label:
-    #                 pass
-    #             else:
-    #                 logger.critical('Could not parse through instruction: "%s" at line %s' % (instruction,i))
-    #                 exit()
-
-    #         except ValueError:
-    #             pass
-
-    #     logger.info('Labels:\n{}'.format(pprint.pformat(self.labels)))
 
 
     def parse_asm(self):
