@@ -138,34 +138,38 @@ class BabyAssembler:
             instruction = line.split()
             try:
                 self.col_3[i] = line.strip()
-                # Before anything, check if last thing was an org
-                if last_was_org:
-                    self.col_1[i] = self.orgs[-1]
-                    last_was_org = False
-                    continue
+                # # Before anything, check if last thing was an org
+                # if last_was_org:
+                #     self.col_1[i] = self.orgs[-1]
+                #     last_was_org = False
+                #     continue
                 # First check if this is whitespace
-                if not instruction:
-                    logger.debug('Found whitespace at line {}'.format(i))
-                    if not(i==0):
-                        if self.col_1[i-1] is None:
-                            logger.warning('Previous address was None')
-                            continue
-                        else:
-                            logger.debug('Extending the address counter {} on this line {}'.format(self.col_1[i-1],i))
-                            self.col_1[i] = self.col_1[i-1]
-                            continue
-                    else:
-                        logger.debug('No found previous value. Continuing.')
-                        continue
+                # if not instruction:
+                #     logger.debug('Found whitespace at line {}'.format(i))
+                #     if not(i==0):
+                #         if self.col_1[i-1] is None:
+                #             logger.warning('Previous address was None')
+                #             continue
+                #         else:
+                #             logger.debug('Extending the address counter {} on this line {}'.format(self.col_1[i-1],i))
+                #             self.col_1[i] = self.col_1[i-1]
+                #             continue
+                #     else:
+                #         logger.debug('No found previous value. Continuing.')
+                #         continue
 
                 # Now check if the last address was defined
                 if not (i==0):
                     logger.debug('Checking if last address was defined')
-                    if (not self.col_1[i-1] and self.orgs):
+                    if last_was_org:
+                        logger.debug('Last instruction was ORG directive. Setting address to {}.'.format(self.orgs[-1]))
+                        self.col_1[i] = self.orgs[-1]
+                        last_was_org = False
+                    elif (not self.col_1[i-1] and self.orgs):
                         logger.debug('Last address was not defined, setting to whatever is in ORGs.')
                         self.col_1[i] = self.orgs[-1]
                     # If the last address was defined, set it to that for now
-                    elif (self.col_1[i-1]):
+                    elif (self.col_1[i-1] and not self.col_1[i]):
                         logger.debug('Last address is defined. Setting current address to that for now.')
                         self.col_1[i] = self.col_1[i-1]
 
@@ -197,31 +201,31 @@ class BabyAssembler:
                     if len(tmp) > 1:
                         # This is an emulated instruction
                         # Add by however much is predetermined
-                        self.col_1[i] = hex(int(str(self.col_1[i]),0)+int(tmp[0]))
-                        self.col_1[i] = '0x'+str(self.col_1[i])[2:].zfill(4)
+                        self.col_1[i+1] = hex(int(str(self.col_1[i]),0)+int(tmp[0]))
+                        self.col_1[i+1] = '0x'+str(self.col_1[i])[2:].zfill(4)
                         # We're done here.
                         continue
                         
                     # Now to determine how much we need to increment the address counter by
                     if '#0x' in instruction:
-                        self.col_1[i] = hex(int(str(self.col_1[i]),0)+2)
+                        self.col_1[i+1] = hex(int(str(self.col_1[i]),0)+2)
                     if '&' in instruction:
-                        self.col_1[i] = hex(int(str(self.col_1[i]),0)+2)                        
+                        self.col_1[i+1] = hex(int(str(self.col_1[i]),0)+2)                        
                     self.col_1[i] = '0x'+str(self.col_1[i])[2:].zfill(4)
                 
                 elif instruction[0][0] == ';':
                     logger.debug('Found comment at line {}'.format(i))
                     if not(i==0):
-                        if self.col_1[i-1] is None:
+                        if self.col_1[i] is None:
                             logger.warning('Previous address was None')
                             continue
                         else:
-                            self.col_1[i] = self.col_1[i-1]
+                            self.col_1[i+1] = self.col_1[i]
                             continue
                     else:
-                        if not(i==0):
+                        if not(i==(len(code)-1)):
                             logger.debug('Storing previous val of {} into old val {} (line {})'.format(self.col_1[i-1],self.col_1[i]),i)
-                            self.col_1[i] = self.col_1[i-1]
+                            self.col_1[i+1] = self.col_1[i]
                             continue
                         else:
                             logger.debug('No found previous value. Continuing.')
@@ -234,16 +238,16 @@ class BabyAssembler:
                     if not (i==0):
                         if self.labels.get(instruction[0]) is None:
                             logger.debug('Found new label: {} (line {})'.format(instruction[0],i))
-                            self.labels[instruction[0]] = self.col_1[i-1]
-                            self.col_1[i] = self.col_1[i-1]
+                            self.labels[instruction[0]] = self.col_1[i]
+                            self.col_1[i+1] = self.col_1[i]
                             was_label = True
                         else:
-                            if self.labels.get(instruction[0]) == self.col_1[i-1]:
+                            if self.labels.get(instruction[0]) == self.col_1[i]:
                                 pass
                             else:
                                 logger.debug('Found duplicate label {} (line {})'.format(instruction[0],i))
                                 dupkey = 'err'+instruction[0]
-                                self.labels[dupkey] = self.col_1[i-1]
+                                self.labels[dupkey] = self.col_1[i]
                                 was_label = True
                     else:
                         # Must be a label?
@@ -258,32 +262,32 @@ class BabyAssembler:
                         continue
 
                 if not (self.__convert_to_opcode(instruction[1]) is None):
-                    self.col_1[i] = hex(int(str(self.col_1[i-1]),0)+2)
-                    self.col_1[i] = '0x'+str(self.col_1[i])[2:].zfill(4)
+                    self.col_1[i+1] = hex(int(str(self.col_1[i]),0)+2)
+                    self.col_1[i+1] = '0x'+str(self.col_1[i+1])[2:].zfill(4)
 
                 elif instruction[1] == 'EQU':
-                    if self.col_1[i-1] is None:
+                    if self.col_1[i] is None:
                         continue
                     else:
                         logger.debug('Storing previous val of {} into old val {} (line {})'.format(self.col_1[i-1],self.col_1[i],i))
-                        self.col_1[i] = self.col_1[i-1]
+                        self.col_1[i+1] = self.col_1[i]
                         continue
                 # Next try to find constants in RAM
                 elif instruction[1] == 'DW':
                     # self.col_1[i-1] = '0x'+str(self.col_1[i-1])[2:].zfill(4)
-                    self.col_1[i] = hex(int(self.col_1[i],0)+2)
-                    self.col_1[i] = '0x'+str(self.col_1[i])[2:].zfill(4)
+                    self.col_1[i+1] = hex(int(self.col_1[i],0)+2)
+                    self.col_1[i+1] = '0x'+str(self.col_1[i+1])[2:].zfill(4)
 
                 elif instruction[1] == 'DS':
                     # self.col_1[i-1] = '0x'+str(self.col_1[i-1])[2:].zfill(4)
-                    self.col_1[i] = hex(int(self.col_1[i],0)+int(instruction[2]))
-                    self.col_1[i] = '0x'+str(self.col_1[i])[2:].zfill(4)
+                    self.col_1[i+1] = hex(int(self.col_1[i],0)+int(instruction[2]))
+                    self.col_1[i+1] = '0x'+str(self.col_1[i+1])[2:].zfill(4)
 
                 # Next try to find constants in RAM
                 elif instruction[1] == 'DB':
                     # self.col_1[i-1] = '0x'+str(self.col_1[i-1])[2:].zfill(4)
-                    self.col_1[i] = hex(int(self.col_1[i],0)+1)
-                    self.col_1[i] = '0x'+str(self.col_1[i])[2:].zfill(4)
+                    self.col_1[i+1] = hex(int(self.col_1[i],0)+1)
+                    self.col_1[i+1] = '0x'+str(self.col_1[i+1])[2:].zfill(4)
 
                 else:
                     if not(i==0):
@@ -292,13 +296,13 @@ class BabyAssembler:
                             continue
                         else:
                             logger.debug('No match found for {}, assuming it\'s just be whitespace.'.format(instruction))
-                            self.col_1[i] = self.col_1[i-1]
+                            self.col_1[i+1] = self.col_1[i]
                             
                     else:
                         logger.debug('Must be whitespace on the first line.')
                         logger.debug('No match found for instruction {} (line {})'.format(instruction[0],i))
                         logger.debug('Storing previous val of {} into old val {}'.format(self.col_1[i-1],self.col_1[i]))
-                        self.col_1[i] = self.col_1[i-1]
+                        self.col_1[i+1] = self.col_1[i]
                         continue
                 was_label=False
                     
