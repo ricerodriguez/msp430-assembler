@@ -132,17 +132,17 @@ class BabyAssembler:
 
     # First pass of the assembler
     def __first_pass(self,code):
-        # last_was_org = False
+        last_was_org = False
         for i,line in enumerate(code):
             line.strip()
             instruction = line.split()
             try:
                 self.col_3[i] = line.strip()
-                # # Before anything, check if last thing was an org
-                # if last_was_org:
-                #     self.col_1[i] = self.orgs[-1]
-                #     last_was_org = False
-                #     continue
+                # Before anything, check if last thing was an org
+                if last_was_org:
+                    self.col_1[i] = self.orgs[-1]
+                    last_was_org = False
+                    continue
                 # First check if this is whitespace
                 if not instruction:
                     logger.debug('Found whitespace at line {}'.format(i))
@@ -172,7 +172,7 @@ class BabyAssembler:
                     
                 # First find the assembler directive ORG
                 if instruction[0] == 'ORG':
-                    # last_was_org = True
+                    last_was_org = True
                     # Address will be in the next element in the list
                     self.col_1[i] = instruction[1]
                     logger.debug('Found ORG directive, line {}, address {}'.format(i,self.col_1[i]))
