@@ -3,7 +3,7 @@ import sys
 import logging
 import argparse
 import pprint
-from resources import msp430_info
+from resources.msp430_info import Registers, Directives, OPCODES
 # Set up logging
 logging.basicConfig(filename='mspasm.log')
 logger = logging.getLogger('BABY ASSEMBLER')
@@ -20,7 +20,7 @@ class BabyAssembler:
 
     def __convert_to_opcode(self,instruction):
         result = None
-        for opcodes in msp430_info.OPCODES:
+        for opcodes in OPCODES:
             result = opcodes.get(instruction)
             if result is None:
                 continue
@@ -28,7 +28,7 @@ class BabyAssembler:
                 return result
         # Got to here. If instruction isn't in there, maybe it's
         # because it's a .b or .w
-        for opcodes in msp430_info.OPCODES:
+        for opcodes in OPCODES:
             result = opcodes.get(instruction[:-2])
             if result is None:
                 continue
@@ -179,29 +179,30 @@ class BabyAssembler:
                     self.col_1[i+1] = hex(int(str(self.col_1[i]),0)+2)
                     self.col_1[i+1] = '0x'+str(self.col_1[i+1])[2:].zfill(4)
 
-                elif instruction[1] == 'EQU':
-                    if self.col_1[i] is None:
-                        continue
+                # Check if this is a directive
+                elif not ((Directives.get(instruction[0]) is None) and (Directives.get(instruction[1]) is None)):
+                    # Here's where we'll store the offset
+                    offset = 0
+                    # Which one is it?
+                    if (Directives.get(instruction[0]) is None):
+                        offset = Directives.get(instruction[1])
                     else:
-                        logger.debug('Storing previous val of {} into old val {} (line {})'.format(self.col_1[i-1],self.col_1[i],i))
-                        self.col_1[i+1] = self.col_1[i]
+                        offset = Directives.get(instruction[0])
+
+                    # Is it DS?
+                    print(offset)
+                    # If we haven't actually found the address, just pass
+                    if (self.col_1[i] is None):
                         continue
-                # Next try to find constants in RAM
-                elif instruction[1] == 'DW':
-                    # self.col_1[i-1] = '0x'+str(self.col_1[i-1])[2:].zfill(4)
-                    self.col_1[i+1] = hex(int(self.col_1[i],0)+2)
-                    self.col_1[i+1] = '0x'+str(self.col_1[i+1])[2:].zfill(4)
-
-                elif instruction[1] == 'DS':
-                    # self.col_1[i-1] = '0x'+str(self.col_1[i-1])[2:].zfill(4)
-                    self.col_1[i+1] = hex(int(self.col_1[i],0)+int(instruction[2]))
-                    self.col_1[i+1] = '0x'+str(self.col_1[i+1])[2:].zfill(4)
-
-                # Next try to find constants in RAM
-                elif instruction[1] == 'DB':
-                    # self.col_1[i-1] = '0x'+str(self.col_1[i-1])[2:].zfill(4)
-                    self.col_1[i+1] = hex(int(self.col_1[i],0)+1)
-                    self.col_1[i+1] = '0x'+str(self.col_1[i+1])[2:].zfill(4)
+                    if (offset < 0):
+                        self.col_1[i+1] = hex(int(self.col_1[i],0)+int(instruction[2]))
+                        self.col_1[i+1] = '0x'+str(self.col_1[i+1])[2:].zfill(4)
+                        # Otherwise, add what it's supposed to
+                    else:
+                        # self.col_1[i] = '0x'+str(self.col_1[i])[2:].zfill(4)
+                        # self.col_1[i+1]
+                        self.col_1[i+1] = hex(int(self.col_1[i],0)+offset)
+                        self.col_1[i+1] = '0x'+str(self.col_1[i+1])[2:].zfill(4)
 
                 else:
                     if not(i==0):
@@ -219,8 +220,6 @@ class BabyAssembler:
                         self.col_1[i+1] = self.col_1[i]
                         continue
                 was_label=False
-                    
-                
                     
             except IndexError as err:
                 logger.debug('Ignoring this error: %s' % err)

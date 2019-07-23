@@ -21,10 +21,10 @@ Registers = {
 }
 
 Directives = {
-    'ORG'    : None,
+    'ORG'    : -1,
     'DW'     : 2,
     'DB'     : 1,
-    'DS'     : None,
+    'DS'     : -1,
     'EQU'    : 0
 }
 
