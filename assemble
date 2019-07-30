@@ -59,12 +59,22 @@ class BabyAssembler:
             except IndexError:
                 pass
 
+    def __get_true_instruction_length(self,instruction):
+        count = 0
+        for section in instruction:
+            count += 1
+            if section == ';':
+                count -= 1
+                break
+        return count
+    
     # First pass of the assembler
     def __first_pass(self,code):
         last_was_org = False
         for i,line in enumerate(code):
             line.strip()
             instruction = line.split()
+            # print(instruction)
             try:
                 self.col_3[i] = line.strip()
                 # Now check if the last address was defined
@@ -131,7 +141,7 @@ class BabyAssembler:
                     logger.debug('Found comment at line {}'.format(i))
                     if not(i==0):
                         if self.col_1[i] is None:
-                            logger.warning('Previous address was None')
+                            logger.debug('Previous address was None. Likely a header comment. Continuing for now.')
                             continue
                         else:
                             self.col_1[i+1] = self.col_1[i]
@@ -190,7 +200,7 @@ class BabyAssembler:
                         offset = Directives.get(instruction[0])
 
                     # Is it DS?
-                    print(offset)
+                    # print(offset)
                     # If we haven't actually found the address, just pass
                     if (self.col_1[i] is None):
                         continue
@@ -226,12 +236,20 @@ class BabyAssembler:
                 pass
 
         logger.info(pprint.pformat(self.labels))
+        # Set the starting address as the first ORG directive
+        for i,address in enumerate(self.col_1):
+            if address is None:
+                self.col_1[i] = self.orgs[0]
+            else:
+                break
+                
 
-    # def __second_pass(self,code):
-    #     was_label = False
-    #     for i,line in enumerate(code):
-    #         line = line.replace(':','')
-    #         instruction = line.split()
+    def __second_pass(self,code):
+        was_label = False
+        for i,line in enumerate(code):
+            line = line.replace(':','')
+            instruction = line.split()
+            
 
 
     def parse_asm(self):
@@ -270,21 +288,21 @@ class BabyAssembler:
                     pretty_addr = addr[2:].upper()
                     symb_tab += '%-50s %-50s\n' % (label,pretty_addr)
                 else:
-                    logger.debug('Found duplicate {}'.format(label[3:]))
+                    logger.error('Found duplicate {}'.format(label[3:]))
                     err_labels[label] = addr[2:].upper()
-                    # logger.debug(err_labels[label])
                     continue
-                if err_labels:
-                    for err,val in sorted(err_labels.items()):                                    
-                        label = err[3:]
-                        addr = val[2:].upper()
-                        symb_err += '%-50s %-50s\n' % (label,addr)
-                else:
-                    pass
+                # logger.critical(pprint.pformat(err_labels))
             except TypeError as err:
                 logger.warning('Received this error when writing the symbol table: {}'.format(err))
                 pass
 
+        print(pprint.pformat(err_labels))
+        if err_labels:
+            # logger.critical('got to here')
+            for err,val in sorted(err_labels.items()):                                    
+                label = err[3:]
+                addr = val.upper()
+                symb_err += '%-50s %-50s\n' % (label,addr)
 
         if self.args.list_file is None:
             try:
