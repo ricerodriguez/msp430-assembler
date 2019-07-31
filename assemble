@@ -152,7 +152,6 @@ class BabyAssembler:
                 logger.debug('Whoops, this is just a directive. Returning from here.')
                 return ''
             else:
-                # print(pprint.pformat(self.labels))
                 # If we're here, it's not a directive, it's not a label,
                 # it's not an instruction... What the hell is it?
                 msg = 'Instruction {} in {} could not be recognized. Maybe a typo?'.format(instruction[0],''.join(instruction))
@@ -192,26 +191,22 @@ class BabyAssembler:
                                         x_const_tmp = checker.group(1).zfill(4)
                                         x_const = ''.join([x_const_tmp[2:],x_const_tmp[:2]])
                                         word_1.append(x_const)
-                                        # word_1.append(bin(int(checker.group(1),16))[2:].zfill(4))
                                     except ValueError:
                                         x_const_tmp = checker.group(2).zfill(4)
                                         x_const = ''.join([x_const_tmp[2:],x_const_tmp[:2]])
                                         word_1.append(x_const)
-                                        # word_1.append(bin(int(checker.group(2),16))[2:].zfill(4))
                                     break
                                 # If it's not immediate and there's a predefined SReg for this type, then
                                 # we'll have to find the value ourselves
                                 elif mode == 'ABSOLUTE':
                                     groups = checker.groups()
                                     groups = list(filter(None,groups))
-                                    # print(groups)
                                     # First check how long it is
                                     if len(groups) == 1:
                                         if not self.labels.get(checker.group(1)) is None:
                                             # https://stackoverflow.com/questions/18533620/getting-the-first-non-none-value-from-list
                                             label = next(item for item in checker.groups() if item is not None)
                                             x_const_tmp = self.labels.get(label)[2:].zfill(4).upper()
-                                            # x_const_tmp = checker.group(1).zfill(4)
                                             x_const = ''.join([x_const_tmp[2:],x_const_tmp[:2]])
                                             word_1.append(x_const)
                                         else:
@@ -219,11 +214,6 @@ class BabyAssembler:
                                             msg = 'Could not find the label {} in instruction \'{}\''.format(checker.group(1),' '.join(instruction))
                                             raise InvalidLabelError(msg)
                                     elif len(groups) == 3:
-                                            # if checker.group(3) is None:
-                                            #     print(' '.join(instruction))
-                                            #     print(groups)
-                                            #     exit()
-                                            label = next(item for item in checker.groups() if item is not None)
                                             x1_const_tmp = int(self.labels.get(checker.group(1))[2:],16)
                                             x2_const_tmp = int(self.labels.get(checker.group(3))[2:],16)
                                             x_const_tmp =  str(int(self.labels.get(checker.group(3))[2:],16))
@@ -235,36 +225,26 @@ class BabyAssembler:
                                                 x_const_tmp = str(int(x1_const_tmp * x2_const_tmp,16)).upper().zfill(4)
                                             elif (checker.group(1) == '/'):
                                                 x_const_tmp = str(int(x1_const_tmp / x2_const_tmp,16)).upper().zfill(4)
-                                                
-                                            # x_const_tmp = checker.group(1).zfill(4)
-                                            # else:
-                                            #     print(pprint.pformat(self.labels))
-                                            #     msg = 'Could not find the label {} in instruction \'{}\''.format(checker.group(1),' '.join(instruction))
-                                            #     raise InvalidLabelError(msg)
-                                            
                                             x_const = ''.join([x_const_tmp[2:],x_const_tmp[:2]])
                                             word_1.append(x_const)
                                             
                                 elif mode == 'SYMBOLIC':
                                     groups = checker.groups()
                                     groups = list(filter(None,groups))
-                                    # print(groups)
                                     # First check how long it is
                                     if len(groups) == 1:
                                         if not self.labels.get(checker.group(1)) is None:
                                             # https://stackoverflow.com/questions/18533620/getting-the-first-non-none-value-from-list
                                             label = next(item for item in checker.groups() if item is not None)
                                             toni = int(self.labels.get(label)[2:].zfill(4).upper(),16)
-                                            pc = int(self.col_1[i][2:].zfill(4).upper(),16)
+                                            pc = int(self.col_1[ind][2:].zfill(4).upper(),16)
                                             x_const_tmp = str(hex(toni-pc)).zfill(4).upper()
-                                            # x_const_tmp = checker.group(1).zfill(4)
                                             x_const = ''.join([x_const_tmp[2:],x_const_tmp[:2]])
                                             word_1.append(x_const)
                                         else:
                                             print(pprint.pformat(self.labels))
                                             msg = 'Could not find the label {} in instruction \'{}\''.format(checker.group(1),' '.join(instruction))
                                             raise InvalidLabelError(msg)
-                                
                                 
                             # Alright, so there's nothing specific. Can we get the register from the instruction?
                             elif not Registers.get(checker.group(1)) is None:
@@ -273,7 +253,6 @@ class BabyAssembler:
                                 break
                             elif not Registers.get(checker.group(2)) is None:
                                 # Indexed
-                                # word_1.append(bin(int(checker.group(1),16))[2:].zfill(4))
                                 x_const_tmp = checker.group(1).zfill(4)
                                 x_const = ''.join([x_const_tmp[2:],x_const_tmp[:2]])
                                 word_1.append(x_const)
@@ -285,7 +264,6 @@ class BabyAssembler:
 
                 # Okay we should have our S-Reg now. Do we?
                 if not len(word_0) == 2:
-                    # print(word_0)
                     # We should have our opcode and S-Reg, so 2.
                     # If we don't, something is wrong.
                     msg = 'Could not determine addressing mode of {} in {}. Perhaps check your syntax?'.format(instruction[curr_i],' '.join(instruction))
@@ -304,9 +282,7 @@ class BabyAssembler:
                             if checker is None:
                                 continue
                             else:
-                                print(checker.groups())
                                 groups = checker.groups()
-                                
                                 logger.debug('Found it! Determined dst mode of \'{}\' was {}'.format(' '.join(instruction),mode))
                                 addressing_dst = mode
                                 # This shouldn't happen but here it is just in case
@@ -314,13 +290,14 @@ class BabyAssembler:
                                     word_0.append('0')
                                     dreg = Registers.get(instruction[curr_i])
                                 elif not (addressing_dst == 'IMMEDIATE' or addressing_dst == 'INDIRECT' or addressing_dst == 'INDIRECT AUTOINCREMENT'):
-                                    # print(groups)                                    
                                     word_0.append('1')
                                     if mode == 'ABSOLUTE' or mode == 'SYMBOLIC':
                                         dreg = Registers.get(Addressing_SRegs.get(mode))
                                     else:
                                         dreg = Registers.get(groups[1])
-                                    # dreg = Registers.get(checker.group(2))
+                                        word_2.append(hex(int(groups[0]))[2:].upper().zfill(4))
+                                        # print(groups[1])
+                                        # word_2.append(
                                 else:
                                     msg = 'Could not determine dst addressing mode in \'{}\'. Is everything spelled correctly?'.format(' '.join(instruction))
                                     raise InvalidInstructionError(msg)
@@ -331,11 +308,9 @@ class BabyAssembler:
                     msg = 'Undefined destination register in \'{}\''.format(' '.join(instruction))
                     raise InvalidInstructionError(msg)
                 else:
-                    # curr_i += 1
                     # Now we have to find BW
                     if instruction[starts_at].endswith('.b'):
                         word_0.append('1')
-                    # elif instruction[starts_at].endswith('.w'):
                     else:
                         word_0.append('0')
 
@@ -354,23 +329,11 @@ class BabyAssembler:
                     msg = 'Did not find As'
                     raise InvalidInstructionError(msg)
                 else:
-                    # print(dreg)
                     # First, is this the constant generator?
                     sreg_int = int(word_0[1],2)
-                    # print(sreg_int)
                     if sreg_int == 3 and word_1:
                         word_1 = []
                     word_0.append(dreg)
-                    # curr_i += 1
-                    # Now to find our D-Reg
-                    # for pattern,mode in Addressing_Prefixes.items():
-                    #     logger.debug('Checking {} in {}'.format(pattern,' '.join(instruction)))
-                    #     checker = re.match(pattern,instruction[curr_i])
-                    #     if checker is None:
-                    #         continue
-                    #     else:
-                    #         logger.debug('Found it! Determined dst mode of \'{}\' was {}'.format(' '.join(instruction),mode))
-                    #         addressing_dst = mode
                             
                     
 
@@ -617,7 +580,7 @@ class BabyAssembler:
             # Write out the LIST file
                 addr = self.col_1[i][2:].upper()
                 # logger.info('Address is %s' % addr)
-                f_lines += '%-10s %-10s %-10s %-30s\n' % (i,addr,self.col_2[i],self.col_3[i])
+                f_lines += '%-10s %-10s %-20s %-30s\n' % (i,addr,self.col_2[i],self.col_3[i])
             except TypeError:
                 logger.warning('Column contains NoneType')
                 continue
