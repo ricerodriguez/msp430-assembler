@@ -1,14 +1,24 @@
 #!/usr/bin/python
+import re
 import sys
 import logging
 import argparse
 import pprint
-from resources.msp430_info import Registers, Directives, OPCODES
+from string import Template
+from resources.msp430_info import Registers, Directives, OPCODES, Addressing_Prefixes, Addressing_SRegs, As_Modes
 # Set up logging
 logging.basicConfig(filename='mspasm.log')
 logger = logging.getLogger('BABY ASSEMBLER')
 log_cmd = logging.StreamHandler()
 logger.addHandler(log_cmd)
+
+class Error(Exception):
+    pass
+
+class InvalidInstructionError(Error):
+    def __init__(self,msg):
+        self.msg = msg
+        logger.error(msg)
 
 class BabyAssembler:
     def __init__(self,args):
@@ -59,19 +69,225 @@ class BabyAssembler:
             except IndexError:
                 pass
 
+    def __get_instruction_format(self,instruction):
+        result = None
+        for i,ops_list in enumerate(OPCODES):
+            if ops_list.get(instruction) is None:
+                continue
+            elif i == 3:
+                emu = ops_list.get(instruction)
+                return self.__get_instruction_format(emu[1][0])
+            else:
+                return i+1
+
+        # Try without the .b or .w
+        for i,ops_list in enumerate(OPCODES):
+            if ops_list.get(instruction[:-2]) is None:
+                continue
+            elif i == 3:
+                emu = ops_list.get(instruction[:-2])
+                return self.__get_instruction_format(emu[1][0])
+            else:
+                return i+1
+
     def __get_true_instruction_length(self,instruction):
         count = 0
         for section in instruction:
             count += 1
-            if section == ';':
+            if re.match(';',section):
                 count -= 1
                 break
+            else:
+                continue
         return count
+
+    def __decode_format_i(self,instruction,length):
+        
+
+    def __decode_instruction(self,instruction):
+        length = self.__get_true_instruction_length(instruction)
+        word_0 = []
+        word_1 = []
+        word_2 = []
+        starts_at = None
+        instruction_format = None
+        addressing_src = None
+        addressing_dst = None
+        if length == 1:
+            if not self.labels.get(instruction[0]) is None:
+                # Ah, it's just a label
+                return ''
+            elif not Directives.get(instruction[0]) is None:
+                return ''
+            
+        # Check for label, directive, and opcode
+        elif length >= 2:
+            # First check for directives
+            if not Directives.get(instruction[0]) is None:
+                return ''
+            # Check if it's a label
+            elif self.labels.get(instruction[0]) is None:
+                # Now check if it's an opcode
+                if not self.__convert_to_opcode(instruction[0]) is None:
+                    word_0.append(self.__convert_to_opcode(instruction[0]))
+                    # Alright now we need to find what format it's in
+                    instruction_format = self.__get_instruction_format(instruction[0])
+                    starts_at = 0
+                else:                    
+                    # If we're here, it's not a directive, it's not a label,
+                    # it's not an instruction... What the hell is it?
+                    msg = 'Instruction {} in {} could not be recognized. Maybe a typo?'.format(instruction[0],''.join(instruction))
+                    raise InvalidInstructionError(msg)
+
+            # If we got to here, it's a label. Check if next instruction is valid
+            elif not self.__convert_to_opcode(instruction[1]) is None:
+                word_0.append(self.__convert_to_opcode(instruction[1]))
+                # Alright now we need to find what format it's in
+                instruction_format = self.__get_instruction_format(instruction[1])
+                starts_at = 1
+            elif not Directives.get(instruction[1]) is None:
+                logger.debug('Whoops, this is just a directive. Returning from here.')
+                return ''
+            else:
+                # print(pprint.pformat(self.labels))
+                # If we're here, it's not a directive, it's not a label,
+                # it's not an instruction... What the hell is it?
+                msg = 'Instruction {} in {} could not be recognized. Maybe a typo?'.format(instruction[0],''.join(instruction))
+                raise InvalidInstructionError(msg)
+
+        # If that worked, keep going
+        if len(word_0) > 0:
+            # Update current index
+            curr_i = starts_at + 1
+            if instruction_format == 1:
+                # Format I
+                # ---------------------------------------------------------
+                # 15 14 13 12 | 11 10 09 08 | 07 | 06 | 05 04 | 03 02 01 00
+                # Opcode      | S-Reg       | Ad | BW | As    | D-Reg
+                # ---------------------------------------------------------
+
+                # Next step is to find our S-Reg.
+                # First check if it's a register
+                if not Registers.get(instruction[starts_at+1]) is None:
+                    word_0 += Registers.get(instruction[curr_i])
+                # It's not a register. Poop. Now we have to check the addressing mode.
+                else:
+                    for pattern,mode in Addressing_Prefixes.items():
+                        logger.debug('Checking {} in {}'.format(pattern,' '.join(instruction)))
+                        checker = re.match(pattern,instruction[curr_i])
+                        if checker is None:
+                            continue
+                        else:
+                            logger.debug('Found it! Determined src mode of \'{}\' was {}'.format(' '.join(instruction),mode))
+                            addressing_src = mode
+                            # First check if this addressing mode needs a particular src register
+                            if not Addressing_SRegs.get(mode) is None:
+                                word_0.append(Registers.get(Addressing_SRegs.get(mode)))
+                                try:
+                                    x_const_tmp = checker.group(1).zfill(4)
+                                    x_const = ''.join([x_const_tmp[2:],x_const_tmp[:2]])
+                                    word_1.append(x_const)
+                                    # word_1.append(bin(int(checker.group(1),16))[2:].zfill(4))
+                                except ValueError:
+                                    x_const_tmp = checker.group(2).zfill(4)
+                                    x_const = ''.join([x_const_tmp[2:],x_const_tmp[:2]])
+                                    word_1.append(x_const)
+                                    # word_1.append(bin(int(checker.group(2),16))[2:].zfill(4))
+                                break
+                            # Alright, so there's nothing specific. Can we get the register from the instruction?
+                            elif not Registers.get(checker.group(1)) is None:
+                                word_0.append(Registers.get(checker.group(1)))
+                                break
+                            elif not Registers.get(checker.group(2)) is None:
+                                # Indexed
+                                # word_1.append(bin(int(checker.group(1),16))[2:].zfill(4))
+                                x_const_tmp = checker.group(1).zfill(4)
+                                x_const = ''.join([x_const_tmp[2:],x_const_tmp[:2]])
+                                word_1.append(x_const)
+                                word_0.append(Registers.get(checker.group(2)))
+                                break
+                            else:
+                                msg = 'Could not determine source register for instruction \'{}\'. Is the syntax correct?'.format(' '.join(instruction))
+                                raise InvalidInstructionError(msg)
+
+                # Okay we should have our S-Reg now. Do we?
+                if not len(word_0) == 2:
+                    # print(word_0)
+                    # We should have our opcode and S-Reg, so 2.
+                    # If we don't, something is wrong.
+                    msg = 'Could not determine addressing mode of {} in {}. Perhaps check your syntax?'.format(instruction[curr_i],' '.join(instruction))
+                    raise InvalidInstructionError(msg)
+                else:
+                    # We have our S-Reg
+                    # Now let's find Ad
+                    curr_i += 1
+                    if not Registers.get(instruction[curr_i]) is None:
+                        word_0.append('0')
+                    else:
+                        for pattern,mode in Addressing_Prefixes.items():
+                            checker = re.match(pattern,instruction[curr_i])
+                            logger.debug('Checking addressing mode of {}.'.format(instruction[curr_i]))
+                            if checker is None:
+                                continue
+                            else:
+                                logger.debug('Found it! Determined dst mode of \'{}\' was {}'.format(' '.join(instruction),mode))
+                                addressing_dst = mode
+                                if addressing_dst == 'REGISTER':
+                                    word_0.append('0')
+                                elif not (addressing_dst == 'IMMEDIATE' or addressing_dst == 'INDIRECT' or addressing_dst == 'INDIRECT AUTOINCREMENT'):
+                                    word_0.append('1')
+                                else:
+                                    msg = 'Could not determine dst addressing mode in \'{}\'. Is everything spelled correctly?'.format(' '.join(instruction))
+                                    raise InvalidInstructionError(msg)
+                                
+                                break
+                # Okay now we have Ad. Check
+                if not len(word_0) == 3:
+                    msg = 'Undefined destination register in \'{}\''.format(' '.join(instruction))
+                    raise InvalidInstructionError(msg)
+                else:
+                    curr_i += 1
+                    # Now we have to find BW
+                    if instruction[starts_at].endswith('.b'):
+                        word_0.append('1')
+                    # elif instruction[starts_at].endswith('.w'):
+                    else:
+                        word_0.append('0')
+
+                if not len(word_0) == 4:
+                    msg = 'Did not find BW.'
+                    raise InvalidInstructionError(msg)
+                else:
+                    curr_i += 1
+                    # Find As
+                    if not addressing_src is None:
+                        word_0.append(As_Modes.get(addressing_src))
+                    else:
+                        word_0.append('00')
+
+            if isinstance(word_0[0],list):
+                word_0, = word_0
+                tmp_emu = Template(word_0[1])
+                emu = tmp_emu.substitute(dst=instruction[length-1])
+                emu = emu.split()
+                return self.__decode_instruction(emu)
+
+            bin_result = ''.join(word_0)
+            full_instruction = str(hex(int(bin_result,2)))[2:].upper().zfill(4)
+            if word_1:
+                full_instruction += ' '
+                full_instruction += ''.join(word_1)
+            if word_2:
+                full_instruction += ' '
+                full_instruction += ''.join(word_2)
+
+            return full_instruction
     
-    # First pass of the assembler
+    # First pass of the assemblern
     def __first_pass(self,code):
         last_was_org = False
         for i,line in enumerate(code):
+            line = line.replace(':','')
             line.strip()
             instruction = line.split()
             # print(instruction)
@@ -159,6 +375,7 @@ class BabyAssembler:
                 # it must be a label
                 else:
                     logger.debug('No other matches so far for instruction {}'.format(instruction[0]))
+                    # Is this a directive?
                     if not (i==0):
                         if self.labels.get(instruction[0]) is None:
                             logger.debug('Found new label: {} (line {})'.format(instruction[0],i))
@@ -242,6 +459,13 @@ class BabyAssembler:
                 self.col_1[i] = self.orgs[0]
             else:
                 break
+
+        for label, addr in self.labels.items():
+            # The only way for it to be None is if it came before the directive
+            if addr is None:
+                self.labels[label] = self.orgs[0]
+            else:
+                continue
                 
 
     def __second_pass(self,code):
@@ -249,8 +473,14 @@ class BabyAssembler:
         for i,line in enumerate(code):
             line = line.replace(':','')
             instruction = line.split()
-            
-
+            if self.__get_true_instruction_length(instruction) <= 0:
+                continue
+            else:
+                try:
+                    self.col_2[i] = self.__decode_instruction(instruction)
+                    # print(self.col_2[i])
+                except IndexError:
+                    break
 
     def parse_asm(self):
         try:
@@ -260,7 +490,7 @@ class BabyAssembler:
                 logger.info('Determined there are {} lines of code'.format(self.size))
                 self.__init_cols()
                 self.__first_pass(code)
-                # self.__second_pass(code)
+                self.__second_pass(code)
                 
         except FileNotFoundError:
             logger.critical('Could not open file %s' % self.args.asm)
@@ -296,7 +526,7 @@ class BabyAssembler:
                 logger.warning('Received this error when writing the symbol table: {}'.format(err))
                 pass
 
-        print(pprint.pformat(err_labels))
+        # print(pprint.pformat(err_labels))
         if err_labels:
             # logger.critical('got to here')
             for err,val in sorted(err_labels.items()):                                    
