@@ -21,14 +21,14 @@ Registers = {
 }
 
 Addressing_Prefixes = {
-    '([0-9])\((R[0-9]{,2})\)'            : 'INDEXED',
-    '#0x(([0-9]){1,4})'    : 'IMMEDIATE',
-    '#(([0-9])+)'          : 'IMMEDIATE',
-    '#(?a)'              : 'ABSOLUTE',
-    '0x(?a)'             : 'SYMBOLIC',
-    '&(?a)'              : 'ABSOLUTE',
-    '@\((R[0-9]{,2})\)\+'            : 'INDIRECT AUTOINCREMENT',
-    '@\((R[0-9]{,2})\)'              : 'INDIRECT'
+    '(\d)\((R\d{,2})\)'                  : 'INDEXED',
+    '#0x((\d|\w){1,4})'                  : 'IMMEDIATE',
+    '#((\d|[a-f]){1,4})'                 : 'IMMEDIATE',
+    '#(\w+)(\+|-|\*|/)?(\w+)?'           : 'ABSOLUTE',
+    '0x(\w+)'                            : 'SYMBOLIC',
+    '&(\w+)'                             : 'ABSOLUTE',
+    '@(R(\d){,2})\+'                     : 'INDIRECT AUTOINCREMENT',
+    '@(R(\d){,2})'                       : 'INDIRECT'
 }
 
 As_Modes = {
