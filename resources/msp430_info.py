@@ -24,7 +24,7 @@ Addressing_Prefixes = {
     '(\d)\((R\d{,2})\)'                  : 'INDEXED',
     '#0x((\d|\w){1,4})'                  : 'IMMEDIATE',
     '#((\d|[a-f]){1,4})'                 : 'IMMEDIATE',
-    '#(\w+)(\+|-|\*|/)?(\w+)?'           : 'ABSOLUTE',
+    '#(\w+)(\+|-|\*|/)?(\w+)?'           : 'IMMEDIATE',
     '0x(\w+)'                            : 'SYMBOLIC',
     '&(\w+)'                             : 'ABSOLUTE',
     '@(R(\d){,2})\+'                     : 'INDIRECT AUTOINCREMENT',

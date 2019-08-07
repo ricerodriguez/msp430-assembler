@@ -33,22 +33,39 @@ class BabyAssembler:
         self.orgs_i = []
         self.labels = {}
 
-    def __convert_to_opcode(self,instruction):
+    def __convert_to_opcode(self,instru):
         result = None
+        instruction = instru
+        # First check errors
+        if not re.search('(\A\W+)',instruction) is None:
+            # This is just a comment
+            return None
+        elif not re.search('(\A\d+)',instruction) is None:
+            oopsy, = re.search('(\A\d+)',instruction).groups()
+            msg = 'Instructions cannot start with a number. Please remove {} from your instruction {}'.format(oopsy,instruction)
+            raise InvalidInstructionError(msg)
+
+        elif re.search('(\w+)',instruction) is None:
+            msg = 'Your instruction \'{}\' somehow doesn\'t contain ANY valid characters. Congrats. Try again.'.format(instruction)
+            raise InvalidInstructionError(msg)
+
+        else:
+            instru, = re.search('(\w+)',instruction).groups()
+            
         for opcodes in OPCODES:
-            result = opcodes.get(instruction)
+            result = opcodes.get(instru)
             if result is None:
                 continue
             else:
                 return result
-        # Got to here. If instruction isn't in there, maybe it's
-        # because it's a .b or .w
-        for opcodes in OPCODES:
-            result = opcodes.get(instruction[:-2])
-            if result is None:
-                continue
-            else:
-                return result
+        # # Got to here. If instruction isn't in there, maybe it's
+        # # because it's a .b or .w
+        # for opcodes in OPCODES:
+        #     result = opcodes.get(instruction[:-2])
+        #     if result is None:
+        #         continue
+        #     else:
+        #         return result
         # Failed both tests. Probably not an opcode
         return result
         
@@ -139,7 +156,7 @@ class BabyAssembler:
                 else:                    
                     # If we're here, it's not a directive, it's not a label,
                     # it's not an instruction... What the hell is it?
-                    msg = 'Instruction {} in {} could not be recognized. Maybe a typo?'.format(instruction[0],''.join(instruction))
+                    msg = 'Instruction {} in {} could not be recognized. Maybe a typo?'.format(instruction[0],' '.join(instruction))
                     raise InvalidInstructionError(msg)
 
             # If we got to here, it's a label. Check if next instruction is valid
@@ -154,7 +171,7 @@ class BabyAssembler:
             else:
                 # If we're here, it's not a directive, it's not a label,
                 # it's not an instruction... What the hell is it?
-                msg = 'Instruction {} in {} could not be recognized. Maybe a typo?'.format(instruction[0],''.join(instruction))
+                msg = 'Instruction {} in {} could not be recognized. Maybe a typo?'.format(instruction[1],' '.join(instruction))
                 raise InvalidInstructionError(msg)
 
         # If that worked, keep going
@@ -186,7 +203,7 @@ class BabyAssembler:
                             if not Addressing_SRegs.get(mode) is None:
                                 word_0.append(Registers.get(Addressing_SRegs.get(mode)))
                                 # If it's immediate we can get the value from here
-                                if mode == 'IMMEDIATE':
+                                if mode == 'IMMEDIATE' and (len(checker.group(1).zfill(4)) <= 4):
                                     try:
                                         x_const_tmp = checker.group(1).zfill(4)
                                         x_const = ''.join([x_const_tmp[2:],x_const_tmp[:2]])
@@ -198,7 +215,7 @@ class BabyAssembler:
                                     break
                                 # If it's not immediate and there's a predefined SReg for this type, then
                                 # we'll have to find the value ourselves
-                                elif mode == 'ABSOLUTE':
+                                elif mode == 'ABSOLUTE' or (len(checker.group(1).zfill(4)) > 4):
                                     groups = checker.groups()
                                     groups = list(filter(None,groups))
                                     # First check how long it is
@@ -225,7 +242,7 @@ class BabyAssembler:
                                                 x_const_tmp = str(int(x1_const_tmp * x2_const_tmp,16)).upper().zfill(4)
                                             elif (checker.group(1) == '/'):
                                                 x_const_tmp = str(int(x1_const_tmp / x2_const_tmp,16)).upper().zfill(4)
-                                            x_const = ''.join([x_const_tmp[2:],x_const_tmp[:2]])
+                                            x_const = ''.join([x_const_tmp[2:],x_const_tmp[:2]]).zfill(4)
                                             word_1.append(x_const)
                                             
                                 elif mode == 'SYMBOLIC':
@@ -334,8 +351,40 @@ class BabyAssembler:
                     if sreg_int == 3 and word_1:
                         word_1 = []
                     word_0.append(dreg)
-                            
-                    
+
+            elif instruction_format == 2:
+                # Format II
+                # ---------------------------------------------------------
+                # 15 14 13 12 11 10 09 08 07 | 06 | 05 04 | 03 02 01 00
+                # Opcode                     | BW | Ad    | S/D-Reg
+                # ---------------------------------------------------------
+                # Alright, first find BW.
+                # Let's take curr_i back to the opcode
+                curr_i -= 1
+                if instruction[curr_i].endswith('.b'):
+                    word_0.append('1')
+                else:
+                    word_0.append('0')
+
+                # Alright now Ad. First check if everything has gone smoothly
+                if not len(word_0) == 2:
+                    msg = 'Something went wrong!'
+                    raise InvalidInstructionError(msg)
+
+                else:
+                    curr_i += 1
+                    if not Registers.get(instruction[starts_at+1]) is None:
+                        word_0 += Registers.get(instruction[curr_i])
+                    else:
+                        for pattern,mode in Addressing_Prefixes.items():
+                            logger.debug('Checking {} in {}'.format(pattern,' '.join(instruction)))
+                            checker = re.match(pattern,instruction[curr_i])
+                            if checker is None:
+                                continue
+                            else:
+                                pass
+
+
 
             if isinstance(word_0[0],list):
                 word_0, = word_0
@@ -475,7 +524,13 @@ class BabyAssembler:
                             was_label = True
                         continue
 
-                if not (self.__convert_to_opcode(instruction[1]) is None):
+                test_instruction = None
+                try:
+                    test_instruction = self.__convert_to_opcode(instruction[1])
+                except InvalidInstructionError:
+                    pass
+
+                if not (test_instruction is None):
                     self.col_1[i+1] = hex(int(str(self.col_1[i]),0)+2)
                     self.col_1[i+1] = '0x'+str(self.col_1[i+1])[2:].zfill(4)
 
