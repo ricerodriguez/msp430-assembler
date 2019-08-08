@@ -528,6 +528,9 @@ class BabyAssembler:
                     logger.debug('No other matches so far for instruction {}'.format(instruction[0]))
                     # Is this a directive?
                     if not (i==0):
+                        if not Directives.get(instruction[0]) is None:
+                            continue
+                            
                         if self.labels.get(instruction[0]) is None:
                             try:
                                 check = self.__check_valid_label(instruction[0])
@@ -753,6 +756,8 @@ class BabyAssembler:
                     lines = f_lines+'\n\n\n\n'+symb_tab
                     if err_labels:
                         lines += '\n\n'+symb_err
+                    else:
+                        self.write_obj()
                     f.writelines(lines)
                 logger.debug('Wrote to file')
             except FileNotFoundError:
@@ -763,6 +768,8 @@ class BabyAssembler:
                     lines = f_lines+'\n\n\n\n'+symb_tab
                     if err_labels:
                         lines += '\n\n'+symb_err
+                    else:
+                        self.write_obj()
                     f.writelines(lines)
             except FileNotFoundError:
                 logger.critical('Path to list does not exist')
@@ -800,4 +807,3 @@ logger.debug('Set log level for console.')
 mspasm = BabyAssembler(args)
 mspasm.parse_asm()
 mspasm.write_list()
-mspasm.write_obj()
