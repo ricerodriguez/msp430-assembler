@@ -376,14 +376,33 @@ class BabyAssembler:
                     if not Registers.get(instruction[starts_at+1]) is None:
                         word_0 += Registers.get(instruction[curr_i])
                     else:
+                        found = False
                         for pattern,mode in Addressing_Prefixes.items():
                             logger.debug('Checking {} in {}'.format(pattern,' '.join(instruction)))
                             checker = re.match(pattern,instruction[curr_i])
                             if checker is None:
                                 continue
                             else:
-                                pass
+                                found = True
+                                word_0.append('1')
+                                break
+                        if not found:
+                            word_0.append('0')
+                            
+            elif instruction_format == 3:
+                # Format III
+                # ---------------------------------------------------------
+                # 15 14 13 | 12 11 10 | 09 08 07 | 06 | 05 04 | 03 02 01 00
+                # Opcode   | C        | 10-bit PC Offset
+                # ---------------------------------------------------------
+                # Okay we have the opcode+C, so now all we have to do is get
+                # the offset.
 
+                # Check if it's a label
+                if not (self.labels.get(instruction[curr_i]) is None):
+                    addr = self.labels.get(instruction[curr_i])[2:].upper().zfill(4)
+                    x_const = ''.join([addr[2:],addr[:2]]).zfill(4)
+                    word_1.append(x_const)
 
 
             if isinstance(word_0[0],list):
@@ -624,6 +643,47 @@ class BabyAssembler:
             logger.critical('Could not open file %s' % self.args.asm)
             exit()
 
+    def write_obj(self):
+        obj = 'VictoriaRodriguez'
+        num_bytes = 0
+        bytes_words_used = []
+        for i,org in enumerate(self.orgs):
+            try:
+                num_bytes=0
+                bytes_words_used = []
+
+                # Find the labels in this address segment
+                for label,addr in self.labels.items():
+                    if int(addr,16) < int(self.col_1[self.orgs_i[i+1]],16) and int(addr,16) > int(self.col_1[self.orgs_i[i]],16):
+                        bytes_words_used.append(addr[2:].upper().zfill(4))
+                        num_bytes += 2
+                    elif addr == self.orgs[i+1]:
+                        break
+                    else:
+                        continue
+
+                num_bytes = hex(int(num_bytes))[2:].upper().zfill(4)
+
+                obj += ('FF00AA55'
+                        '%s'    # First address in this segment
+                        '%s'    # Two bytes with number of bytes used in this addr seg
+                        %
+                        (self.orgs[i][2:],
+                         num_bytes))
+
+                for byte_word_used in bytes_words_used:
+                    obj += byte_word_used
+                
+            except IndexError:
+                break
+
+        obj += 'FF00AA55'
+        fname = self.args.asm[:-4]+'.txt'
+        with open(fname,'w+') as f:
+            f.write(obj)
+            
+        print(obj)
+
     def write_list(self):
         f_lines = ''
         symb_tab = '%-50s %-50s\n' %('Label','Value')
@@ -664,7 +724,7 @@ class BabyAssembler:
 
         if self.args.list_file is None:
             try:
-                fname = self.args.asm[:-4]+'.list'
+                fname = self.args.asm[:-4]+'.lst'
                 with open(fname,'w+') as f:
                     lines = f_lines+'\n\n\n\n'+symb_tab
                     if err_labels:
@@ -716,3 +776,4 @@ logger.debug('Set log level for console.')
 mspasm = BabyAssembler(args)
 mspasm.parse_asm()
 mspasm.write_list()
+mspasm.write_obj()
