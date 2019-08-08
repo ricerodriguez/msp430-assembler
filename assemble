@@ -91,6 +91,16 @@ class BabyAssembler:
             except IndexError:
                 pass
 
+    def __check_valid_label(self,label):
+        if len(label) > 24:
+            msg = 'Your label is over 24 characters long. Please give your label a shorter name.'
+            raise InvalidLabelError(msg)
+        elif not re.search('(\W+)',label) is None:
+            oops, = re.search('(\W+)',label).groups()
+            msg = 'Your label \'{}\' contains invalid characters such as \'{}\'. Please remove these characters from your label.'.format(label,oops)
+            raise InvalidLabelError(msg)
+        
+
     def __get_instruction_format(self,instruction):
         result = None
         for i,ops_list in enumerate(OPCODES):
@@ -519,16 +529,25 @@ class BabyAssembler:
                     # Is this a directive?
                     if not (i==0):
                         if self.labels.get(instruction[0]) is None:
-                            logger.debug('Found new label: {} (line {})'.format(instruction[0],i))
-                            self.labels[instruction[0]] = self.col_1[i]
-                            self.col_1[i+1] = self.col_1[i]
-                            was_label = True
+                            try:
+                                check = self.__check_valid_label(instruction[0])
+                                logger.debug('Found new label: {} (line {})'.format(instruction[0],i))
+                                self.labels[instruction[0]] = self.col_1[i]
+                                self.col_1[i+1] = self.col_1[i]
+                                was_label = True
+                            except InvalidLabelError:
+                                logger.debug('Found invalid label {} (line {})'.format(instruction[0],i))
+                                invkey = 'errINV'+instruction[0]
+                                self.labels[invkey] = self.col_1[i]
+                                was_label = True
+
+                                pass
                         else:
                             if self.labels.get(instruction[0]) == self.col_1[i]:
                                 pass
                             else:
                                 logger.debug('Found duplicate label {} (line {})'.format(instruction[0],i))
-                                dupkey = 'err'+instruction[0]
+                                dupkey = 'errDUP'+instruction[0]
                                 self.labels[dupkey] = self.col_1[i]
                                 was_label = True
                     else:
@@ -689,7 +708,7 @@ class BabyAssembler:
         symb_tab = '%-50s %-50s\n' %('Label','Value')
         err_labels = {}
         symb_err = '{:^55}\n'.format('ERRORS:')
-        symb_err += '%-50s %-50s\n' %('Duplicate Label','Value')
+        symb_err += '%-20s %-20s %-20s\n' %('Label','Value','Problem')
         for i in range(self.size):
             try:
             # Write out the LIST file
@@ -706,7 +725,7 @@ class BabyAssembler:
                     pretty_addr = addr[2:].upper()
                     symb_tab += '%-50s %-50s\n' % (label,pretty_addr)
                 else:
-                    logger.error('Found duplicate {}'.format(label[3:]))
+                    logger.error('Error with label {}'.format(label[6:]))
                     err_labels[label] = addr[2:].upper()
                     continue
                 # logger.critical(pprint.pformat(err_labels))
@@ -719,8 +738,13 @@ class BabyAssembler:
             # logger.critical('got to here')
             for err,val in sorted(err_labels.items()):                                    
                 label = err[3:]
+                prob = label[:3]
+                if prob == 'INV':
+                    prob = 'INVALID CHARS'
+                elif prob == 'DUP':
+                    prob = 'DUPLICATE'
                 addr = val.upper()
-                symb_err += '%-50s %-50s\n' % (label,addr)
+                symb_err += '%-20s %-20s %-20s\n' % (label[3:],addr,prob)
 
         if self.args.list_file is None:
             try:
