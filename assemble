@@ -92,8 +92,8 @@ class BabyAssembler:
                 pass
 
     def __check_valid_label(self,label):
-        if len(label) > 24:
-            msg = 'Your label is over 24 characters long. Please give your label a shorter name.'
+        if len(label) > 32:
+            msg = f'Your label \'{label}\' is over 32 characters long. Please give your label a shorter name.'
             raise InvalidLabelError(msg)
         elif not re.search('(\W+)',label) is None:
             oops, = re.search('(\W+)',label).groups()
@@ -706,7 +706,61 @@ class BabyAssembler:
             
         print(obj)
 
+    def write_mem(self):
+        logger.debug('Writing memory file...')
+        for label,addr in sorted(self.labels.items()):
+            try:
+                if label.startswith('err'):
+                    logger.error('Error with label {}'.format(label[6:]))
+                    err_labels[label] = addr[2:].upper()
+                    exit(-1)
+                # logger.critical(pprint.pformat(err_labels))
+            except TypeError as err:
+                logger.warning('Received this error when writing the symbol table: {}'.format(err))
+                pass
+        
+        f_lines = ''
+        for i in range(self.size):
+            try:
+                # full_instruction = full_instruction[2:]+full_instruction[:2]
+                # instr = self.col_2[i]+'.'[:-1]
+                instr_full = self.col_2[i].replace(' ','')
+                instr_1 = instr_full[:4]
+                instr_2 = None
+                instr_3 = None
+                if len(instr_full) > 4:
+                    instr_2 = instr_full[4:8]
+                    if len(instr_full) > 8:
+                        instr_3 = instr_full[8:]
+                    
+                # mem_instr = instr[i][2:]+instr[i][:2]
+                print(instr_full)
+                print(instr_1)
+                # f_lines += f'{self.col_2[i]} // {self.col_3[i]}\n'
+                if instr_full:
+                    f_lines += f'{instr_1[2:]} {instr_1[:2]} '
+                    if not instr_2 is None:
+                        f_lines += f'{instr_2[2:]} {instr_2[:2]} '
+                    if not instr_3 is None:
+                        f_lines += f'{instr_3[2:]} {instr_3[:2]} '
+                        
+            except TypeError as err:
+                logger.warning(err)
+                continue
+            except IndexError as err:
+                break
+            
+        with open(f'{self.args.asm[:-4]}.mem','w+') as f:
+            f_lines = [f'\n{x}' if (((i%10)==0) and i>0) else f'{x}' for i,x in enumerate(f_lines.split())]
+            # f_lines.splitlines()
+            print(f_lines)
+            # f_lines = [x'\n' if (i%10==0) else x for i,x in enumerate(f_lines)]
+            ff_lines = ' '.join(f_lines)
+            f.write(ff_lines)
+            
+
     def write_list(self):
+        logger.debug('Writing list file...')
         f_lines = ''
         symb_tab = '%-50s %-50s\n' %('Label','Value')
         err_labels = {}
@@ -756,7 +810,7 @@ class BabyAssembler:
                     lines = f_lines+'\n\n\n\n'+symb_tab
                     if err_labels:
                         lines += '\n\n'+symb_err
-                    else:
+                    elif self.args.obj:
                         self.write_obj()
                     f.writelines(lines)
                 logger.debug('Wrote to file')
@@ -768,7 +822,7 @@ class BabyAssembler:
                     lines = f_lines+'\n\n\n\n'+symb_tab
                     if err_labels:
                         lines += '\n\n'+symb_err
-                    else:
+                    elif self.args.obj:
                         self.write_obj()
                     f.writelines(lines)
             except FileNotFoundError:
@@ -776,24 +830,15 @@ class BabyAssembler:
 
 parser = argparse.ArgumentParser(description='Baby assembler that produces LIST file for a subset of the MSP430 instructions')
 parser.add_argument('asm',help='assembly file for the assembler to parse',metavar='asm_file')
-parser.add_argument('--list_file',help='list file')
+parser.add_argument('--list_file',help='path to list file')
 parser.add_argument('-v','--verbose',help='outputs logging to console',nargs='?',default='WARNING',metavar='LOG LEVEL',choices=['DEBUG','debug','INFO','info','WARNING','warning','ERROR','error','CRITICAL','critical'])
 parser.add_argument('-m','--mem',help='write mem file for Verilog',action='store_true')
+parser.add_argument('-l','--list',help='write list file',action='store_true')
+parser.add_argument('-o','--obj',help='write object file',action='store_true')
 args = parser.parse_args()
 
 try:
-    if args.verbose.lower() == 'debug':
-        logger.setLevel(logging.DEBUG)
-    elif args.verbose.lower() == 'info':
-        logger.setLevel(logging.INFO)
-    elif args.verbose.lower() == 'warning':
-        logger.setLevel(logging.WARNING)
-    elif args.verbose.lower() == 'error':
-        logger.setLevel(logging.ERROR)
-    elif args.verbose.lower() == 'critical':
-        logger.setLevel(logging.CRITICAL)
-    else:
-        logger.setLevel(logging.NOTSET)
+    exec(f'logger.setLevel(logging.{args.verbose.upper()})')
 except AttributeError:
     logger.setLevel(logging.WARNING)
 
@@ -806,4 +851,15 @@ logger.debug('Set log level for console.')
 
 mspasm = BabyAssembler(args)
 mspasm.parse_asm()
-mspasm.write_list()
+if (args.list):
+    mspasm.write_list()
+if (args.obj):
+    mspasm.write_obj()
+if (args.mem):
+    mspasm.write_mem()
+
+# Lambda magic executes the function if the option is selected
+
+# map((lambda x:{args.mem:mspasm.write_mem,args.list:mspasm.write_list,args.obj:mspasm.write_obj}.get(x)()(x)),[args.mem,args.list,args.obj])
+# [(lambda x:{args.mem:mspasm.write_mem,args.list:mspasm.write_list,args.obj:mspasm.write_obj}.get(x)())(x) for x in [
+
