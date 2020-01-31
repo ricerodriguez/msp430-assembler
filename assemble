@@ -197,8 +197,10 @@ class BabyAssembler:
 
                 # Next step is to find our S-Reg.
                 # First check if it's a register
-                if not Registers.get(instruction[starts_at+1]) is None:
-                    word_0 += Registers.get(instruction[curr_i])
+                strip_instr = instruction[starts_at+1].strip(',')
+                if not Registers.get(strip_instr) is None:
+                    word_0.append(Registers.get(strip_instr))
+
                 # It's not a register. Poop. Now we have to check the addressing mode.
                 else:
                     for pattern,mode in Addressing_Prefixes.items():
@@ -237,7 +239,7 @@ class BabyAssembler:
                                             x_const = ''.join([x_const_tmp[2:],x_const_tmp[:2]])
                                             word_1.append(x_const)
                                         else:
-                                            print(pprint.pformat(self.labels))
+                                            # print(pprint.pformat(self.labels))
                                             msg = 'Could not find the label {} in instruction \'{}\''.format(checker.group(1),' '.join(instruction))
                                             raise InvalidLabelError(msg)
                                     elif len(groups) == 3:
@@ -269,7 +271,7 @@ class BabyAssembler:
                                             x_const = ''.join([x_const_tmp[2:],x_const_tmp[:2]])
                                             word_1.append(x_const)
                                         else:
-                                            print(pprint.pformat(self.labels))
+                                            # print(pprint.pformat(self.labels))
                                             msg = 'Could not find the label {} in instruction \'{}\''.format(checker.group(1),' '.join(instruction))
                                             raise InvalidLabelError(msg)
                                 
@@ -704,7 +706,7 @@ class BabyAssembler:
         with open(fname,'w+') as f:
             f.write(obj)
             
-        print(obj)
+        # print(obj)
 
     def write_mem(self):
         logger.debug('Writing memory file...')
@@ -734,15 +736,15 @@ class BabyAssembler:
                         instr_3 = instr_full[8:]
                     
                 # mem_instr = instr[i][2:]+instr[i][:2]
-                print(instr_full)
-                print(instr_1)
+                # print(instr_full)
+                # print(instr_1)
                 # f_lines += f'{self.col_2[i]} // {self.col_3[i]}\n'
                 if instr_full:
-                    f_lines += f'{instr_1[2:]} {instr_1[:2]} '
+                    f_lines += f'{instr_1[:2]} {instr_1[2:]} '
                     if not instr_2 is None:
-                        f_lines += f'{instr_2[2:]} {instr_2[:2]} '
+                        f_lines += f'{instr_2[:2]} {instr_2[2:]} '
                     if not instr_3 is None:
-                        f_lines += f'{instr_3[2:]} {instr_3[:2]} '
+                        f_lines += f'{instr_3[:2]} {instr_3[2:]} '
                         
             except TypeError as err:
                 logger.warning(err)
@@ -752,9 +754,6 @@ class BabyAssembler:
             
         with open(f'{self.args.asm[:-4]}.mem','w+') as f:
             f_lines = [f'\n{x}' if (((i%10)==0) and i>0) else f'{x}' for i,x in enumerate(f_lines.split())]
-            # f_lines.splitlines()
-            print(f_lines)
-            # f_lines = [x'\n' if (i%10==0) else x for i,x in enumerate(f_lines)]
             ff_lines = ' '.join(f_lines)
             f.write(ff_lines)
             
@@ -857,9 +856,4 @@ if (args.obj):
     mspasm.write_obj()
 if (args.mem):
     mspasm.write_mem()
-
-# Lambda magic executes the function if the option is selected
-
-# map((lambda x:{args.mem:mspasm.write_mem,args.list:mspasm.write_list,args.obj:mspasm.write_obj}.get(x)()(x)),[args.mem,args.list,args.obj])
-# [(lambda x:{args.mem:mspasm.write_mem,args.list:mspasm.write_list,args.obj:mspasm.write_obj}.get(x)())(x) for x in [
 
