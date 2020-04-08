@@ -1,0 +1,872 @@
+#!/usr/bin/python
+import re
+import sys
+import logging
+import argparse
+import pprint
+from string import Template
+from resources.msp430_info import Registers, Directives, OPCODES, Addressing_Prefixes, Addressing_SRegs, As_Modes
+# Set up logging
+logging.basicConfig(filename='mspasm.log')
+logger = logging.getLogger('BABY ASSEMBLER')
+log_cmd = logging.StreamHandler()
+logger.addHandler(log_cmd)
+
+class Error(Exception):
+    pass
+
+class InvalidInstructionError(Error):
+    def __init__(self,msg):
+        self.msg = msg
+        logger.error(msg)
+
+class InvalidLabelError(Error):
+    def __init__(self,msg):
+        self.msg = msg
+        logger.error(msg)
+
+class BabyAssembler:
+    def __init__(self,args):
+        self.args = args
+        self.list_cols = []
+        self.orgs = []
+        self.orgs_i = []
+        self.labels = {}
+
+    def __convert_to_opcode(self,instru):
+        result = None
+        instruction = instru
+        # First check errors
+        if not re.search('(\A\W+)',instruction) is None:
+            # This is just a comment
+            return None
+        elif not re.search('(\A\d+)',instruction) is None:
+            oopsy, = re.search('(\A\d+)',instruction).groups()
+            msg = 'Instructions cannot start with a number. Please remove {} from your instruction {}'.format(oopsy,instruction)
+            raise InvalidInstructionError(msg)
+
+        elif re.search('(\w+)',instruction) is None:
+            msg = 'Your instruction \'{}\' somehow doesn\'t contain ANY valid characters. Congrats. Try again.'.format(instruction)
+            raise InvalidInstructionError(msg)
+
+        else:
+            instru, = re.search('(\w+)',instruction).groups()
+            
+        for opcodes in OPCODES:
+            result = opcodes.get(instru)
+            if result is None:
+                continue
+            else:
+                return result
+        # # Got to here. If instruction isn't in there, maybe it's
+        # # because it's a .b or .w
+        # for opcodes in OPCODES:
+        #     result = opcodes.get(instruction[:-2])
+        #     if result is None:
+        #         continue
+        #     else:
+        #         return result
+        # Failed both tests. Probably not an opcode
+        return result
+        
+
+    def __init_cols(self):
+        self.col_0 = [None] * self.size         # Source File Line Number
+        self.col_1 = [None] * self.size         # Addr
+        self.col_2 = [''] * self.size           # Encoded Instruction
+        self.col_3 = [''] * self.size           # Opcode
+        self.col_4 = [''] * self.size           # SRC
+        self.col_5 = [''] * self.size           # DST
+    
+
+    def __get_size(self,code):
+        logger.debug('Getting the number of lines of code.')
+        for i,line in enumerate(code):
+            try:
+                if line.strip().split()[0] == 'END':
+                    logger.debug('Found the END directive.')
+                    self.size = i
+                else:
+                    continue
+            except IndexError:
+                pass
+
+    def __check_valid_label(self,label):
+        if len(label) > 32:
+            msg = f'Your label \'{label}\' is over 32 characters long. Please give your label a shorter name.'
+            raise InvalidLabelError(msg)
+        elif not re.search('(\W+)',label) is None:
+            oops, = re.search('(\W+)',label).groups()
+            msg = 'Your label \'{}\' contains invalid characters such as \'{}\'. Please remove these characters from your label.'.format(label,oops)
+            raise InvalidLabelError(msg)
+        
+
+    def __get_instruction_format(self,instruction):
+        result = None
+        for i,ops_list in enumerate(OPCODES):
+            if ops_list.get(instruction) is None:
+                continue
+            elif i == 3:
+                emu = ops_list.get(instruction)
+                return self.__get_instruction_format(emu[1][0])
+            else:
+                return i+1
+
+        # Try without the .b or .w
+        for i,ops_list in enumerate(OPCODES):
+            if ops_list.get(instruction[:-2]) is None:
+                continue
+            elif i == 3:
+                emu = ops_list.get(instruction[:-2])
+                return self.__get_instruction_format(emu[1][0])
+            else:
+                return i+1
+
+    def __get_true_instruction_length(self,instruction):
+        count = 0
+        for section in instruction:
+            count += 1
+            if re.match(';',section):
+                count -= 1
+                break
+            else:
+                continue
+        return count
+
+    def __decode_instruction(self,instruction,ind):
+        length = self.__get_true_instruction_length(instruction)
+        word_0 = []
+        word_1 = []
+        word_2 = []
+        dreg = None
+        starts_at = None
+        instruction_format = None
+        addressing_src = None
+        addressing_dst = None
+        if length == 1:
+            if not self.labels.get(instruction[0]) is None:
+                # Ah, it's just a label
+                return ''
+            elif not Directives.get(instruction[0]) is None:
+                return ''
+            
+        # Check for label, directive, and opcode
+        elif length >= 2:
+            # First check for directives
+            if not Directives.get(instruction[0]) is None:
+                return ''
+            # Check if it's a label
+            elif self.labels.get(instruction[0]) is None:
+                # Now check if it's an opcode
+                if not self.__convert_to_opcode(instruction[0]) is None:
+                    word_0.append(self.__convert_to_opcode(instruction[0]))
+                    # Alright now we need to find what format it's in
+                    instruction_format = self.__get_instruction_format(instruction[0])
+                    starts_at = 0
+                else:                    
+                    # If we're here, it's not a directive, it's not a label,
+                    # it's not an instruction... What the hell is it?
+                    msg = 'Instruction {} in {} could not be recognized. Maybe a typo?'.format(instruction[0],' '.join(instruction))
+                    raise InvalidInstructionError(msg)
+
+            # If we got to here, it's a label. Check if next instruction is valid
+            elif not self.__convert_to_opcode(instruction[1]) is None:
+                word_0.append(self.__convert_to_opcode(instruction[1]))
+                # Alright now we need to find what format it's in
+                instruction_format = self.__get_instruction_format(instruction[1])
+                starts_at = 1
+            elif not Directives.get(instruction[1]) is None:
+                logger.debug('Whoops, this is just a directive. Returning from here.')
+                return ''
+            else:
+                # If we're here, it's not a directive, it's not a label,
+                # it's not an instruction... What the hell is it?
+                msg = 'Instruction {} in {} could not be recognized. Maybe a typo?'.format(instruction[1],' '.join(instruction))
+                raise InvalidInstructionError(msg)
+
+        # If that worked, keep going
+        if len(word_0) > 0:
+            # Update current index
+            curr_i = starts_at + 1
+            if instruction_format == 1:
+                # Format I
+                # ---------------------------------------------------------
+                # 15 14 13 12 | 11 10 09 08 | 07 | 06 | 05 04 | 03 02 01 00
+                # Opcode      | S-Reg       | Ad | BW | As    | D-Reg
+                # ---------------------------------------------------------
+
+                # Next step is to find our S-Reg.
+                # First check if it's a register
+                strip_instr = instruction[starts_at+1].strip(',')
+                if not Registers.get(strip_instr) is None:
+                    word_0.append(Registers.get(strip_instr))
+
+                # It's not a register. Poop. Now we have to check the addressing mode.
+                else:
+                    for pattern,mode in Addressing_Prefixes.items():
+                        logger.debug('Checking {} in {}'.format(pattern,' '.join(instruction)))
+                        checker = re.match(pattern,instruction[curr_i])
+                        if checker is None:
+                            continue
+                        else:
+                            logger.debug('Found it! Determined src mode of \'{}\' was {}'.format(' '.join(instruction),mode))
+                            addressing_src = mode
+                            # First check if this addressing mode needs a particular src register
+                            if not Addressing_SRegs.get(mode) is None:
+                                word_0.append(Registers.get(Addressing_SRegs.get(mode)))
+                                # If it's immediate we can get the value from here
+                                if mode == 'IMMEDIATE' and (len(checker.group(1).zfill(4)) <= 4):
+                                    try:
+                                        x_const_tmp = checker.group(1).zfill(4)
+                                        x_const = ''.join([x_const_tmp[2:],x_const_tmp[:2]])
+                                        word_1.append(x_const)
+                                    except ValueError:
+                                        x_const_tmp = checker.group(2).zfill(4)
+                                        x_const = ''.join([x_const_tmp[2:],x_const_tmp[:2]])
+                                        word_1.append(x_const)
+                                    break
+                                # If it's not immediate and there's a predefined SReg for this type, then
+                                # we'll have to find the value ourselves
+                                elif mode == 'ABSOLUTE' or (len(checker.group(1).zfill(4)) > 4):
+                                    groups = checker.groups()
+                                    groups = list(filter(None,groups))
+                                    # First check how long it is
+                                    if len(groups) == 1:
+                                        if not self.labels.get(checker.group(1)) is None:
+                                            # https://stackoverflow.com/questions/18533620/getting-the-first-non-none-value-from-list
+                                            label = next(item for item in checker.groups() if item is not None)
+                                            x_const_tmp = self.labels.get(label)[2:].zfill(4).upper()
+                                            x_const = ''.join([x_const_tmp[2:],x_const_tmp[:2]])
+                                            word_1.append(x_const)
+                                        else:
+                                            # print(pprint.pformat(self.labels))
+                                            msg = 'Could not find the label {} in instruction \'{}\''.format(checker.group(1),' '.join(instruction))
+                                            raise InvalidLabelError(msg)
+                                    elif len(groups) == 3:
+                                            x1_const_tmp = int(self.labels.get(checker.group(1))[2:],16)
+                                            x2_const_tmp = int(self.labels.get(checker.group(3))[2:],16)
+                                            x_const_tmp =  str(int(self.labels.get(checker.group(3))[2:],16))
+                                            if (checker.group(1) == '+'):
+                                                x_const_tmp = str(int(x1_const_tmp + x2_const_tmp,16)).upper().zfill(4)
+                                            elif (checker.group(1) == '-'):
+                                                x_const_tmp = str(int(x1_const_tmp - x2_const_tmp,16)).upper().zfill(4)
+                                            elif (checker.group(1) == '*'):
+                                                x_const_tmp = str(int(x1_const_tmp * x2_const_tmp,16)).upper().zfill(4)
+                                            elif (checker.group(1) == '/'):
+                                                x_const_tmp = str(int(x1_const_tmp / x2_const_tmp,16)).upper().zfill(4)
+                                            x_const = ''.join([x_const_tmp[2:],x_const_tmp[:2]]).zfill(4)
+                                            word_1.append(x_const)
+                                            
+                                elif mode == 'SYMBOLIC':
+                                    groups = checker.groups()
+                                    groups = list(filter(None,groups))
+                                    # First check how long it is
+                                    if len(groups) == 1:
+                                        if not self.labels.get(checker.group(1)) is None:
+                                            # https://stackoverflow.com/questions/18533620/getting-the-first-non-none-value-from-list
+                                            label = next(item for item in checker.groups() if item is not None)
+                                            toni = int(self.labels.get(label)[2:].zfill(4).upper(),16)
+                                            pc = int(self.col_1[ind][2:].zfill(4).upper(),16)
+                                            x_const_tmp = str(hex(toni-pc)).zfill(4).upper()
+                                            x_const = ''.join([x_const_tmp[2:],x_const_tmp[:2]])
+                                            word_1.append(x_const)
+                                        else:
+                                            # print(pprint.pformat(self.labels))
+                                            msg = 'Could not find the label {} in instruction \'{}\''.format(checker.group(1),' '.join(instruction))
+                                            raise InvalidLabelError(msg)
+                                
+                            # Alright, so there's nothing specific. Can we get the register from the instruction?
+                            elif not Registers.get(checker.group(1)) is None:
+                                # This is either indirect or indirect autoincrement
+                                word_0.append(Registers.get(checker.group(1)))
+                                break
+                            elif not Registers.get(checker.group(2)) is None:
+                                # Indexed
+                                x_const_tmp = checker.group(1).zfill(4)
+                                x_const = ''.join([x_const_tmp[2:],x_const_tmp[:2]])
+                                word_1.append(x_const)
+                                word_0.append(Registers.get(checker.group(2)))
+                                break
+                            else:
+                                msg = 'Could not determine source register for instruction \'{}\'. Is the syntax correct?'.format(' '.join(instruction))
+                                raise InvalidInstructionError(msg)
+
+                # Okay we should have our S-Reg now. Do we?
+                if not len(word_0) == 2:
+                    # We should have our opcode and S-Reg, so 2.
+                    # If we don't, something is wrong.
+                    msg = 'Could not determine addressing mode of {} in {}. Perhaps check your syntax?'.format(instruction[curr_i],' '.join(instruction))
+                    raise InvalidInstructionError(msg)
+                else:
+                    # We have our S-Reg
+                    # Now let's find Ad
+                    curr_i += 1
+                    if not Registers.get(instruction[curr_i]) is None:
+                        word_0.append('0')
+                        dreg = Registers.get(instruction[curr_i])
+                    else:
+                        for pattern,mode in Addressing_Prefixes.items():
+                            checker = re.match(pattern,instruction[curr_i])
+                            logger.debug('Checking addressing mode of {}.'.format(instruction[curr_i]))
+                            if checker is None:
+                                continue
+                            else:
+                                groups = checker.groups()
+                                logger.debug('Found it! Determined dst mode of \'{}\' was {}'.format(' '.join(instruction),mode))
+                                addressing_dst = mode
+                                # This shouldn't happen but here it is just in case
+                                if addressing_dst == 'REGISTER':
+                                    word_0.append('0')
+                                    dreg = Registers.get(instruction[curr_i])
+                                elif not (addressing_dst == 'IMMEDIATE' or addressing_dst == 'INDIRECT' or addressing_dst == 'INDIRECT AUTOINCREMENT'):
+                                    word_0.append('1')
+                                    if mode == 'ABSOLUTE' or mode == 'SYMBOLIC':
+                                        dreg = Registers.get(Addressing_SRegs.get(mode))
+                                    else:
+                                        dreg = Registers.get(groups[1])
+                                        word_2.append(hex(int(groups[0]))[2:].upper().zfill(4))
+                                        # print(groups[1])
+                                        # word_2.append(
+                                else:
+                                    msg = 'Could not determine dst addressing mode in \'{}\'. Is everything spelled correctly?'.format(' '.join(instruction))
+                                    raise InvalidInstructionError(msg)
+
+                                break
+                # Okay now we have Ad. Check
+                if not len(word_0) == 3:
+                    msg = 'Undefined destination register in \'{}\''.format(' '.join(instruction))
+                    raise InvalidInstructionError(msg)
+                else:
+                    # Now we have to find BW
+                    if instruction[starts_at].endswith('.b'):
+                        word_0.append('1')
+                    else:
+                        word_0.append('0')
+
+                if not len(word_0) == 4:
+                    msg = 'Did not find BW.'
+                    raise InvalidInstructionError(msg)
+                else:
+                    # curr_i += 1
+                    # Find As
+                    if not addressing_src is None:
+                        word_0.append(As_Modes.get(addressing_src))
+                    else:
+                        word_0.append('00')
+
+                if not len(word_0) == 5:
+                    msg = 'Did not find As'
+                    raise InvalidInstructionError(msg)
+                else:
+                    # First, is this the constant generator?
+                    sreg_int = int(word_0[1],2)
+                    if sreg_int == 3 and word_1:
+                        word_1 = []
+                    word_0.append(dreg)
+
+            elif instruction_format == 2:
+                # Format II
+                # ---------------------------------------------------------
+                # 15 14 13 12 11 10 09 08 07 | 06 | 05 04 | 03 02 01 00
+                # Opcode                     | BW | Ad    | S/D-Reg
+                # ---------------------------------------------------------
+                # Alright, first find BW.
+                # Let's take curr_i back to the opcode
+                curr_i -= 1
+                if instruction[curr_i].endswith('.b'):
+                    word_0.append('1')
+                    logger.debug(f'Instruction {instruction[curr_i]} determined to be byte instruction')
+                else:
+                    word_0.append('0')
+                    logger.debug(f'Instruction {instruction[curr_i]} determined to be word instruction')
+                    logger.debug(f'Word so far: {word_0}')
+
+                # Alright now Ad. First check if everything has gone smoothly
+                if not len(word_0) == 2:
+                    msg = 'Something went wrong!'
+                    raise InvalidInstructionError(msg)
+
+                else:
+                    curr_i += 1
+                    logger.debug(f'Now we\'re looking at the src/dst: {instruction[curr_i]}')
+                    if not Registers.get(instruction[starts_at+1]) is None:
+                        word_0 += '00'
+                        word_0 += Registers.get(instruction[curr_i])
+                        logger.debug(f'Register mode. Word so far: {word_0}')
+                    else:
+                        found = False
+                        for pattern,mode in Addressing_Prefixes.items():
+                            logger.debug('Checking {} in {}'.format(pattern,' '.join(instruction)))
+                            checker = re.match(pattern,instruction[curr_i])
+                            if checker is None:
+                                continue
+                            else:
+                                found = True
+                                word_0.append('1')
+                                break
+                        if not found:
+                            word_0.append('0')
+                            # logger.debug(f'Register mode. Word so far: {word_0}')
+                            
+            elif instruction_format == 3:
+                # Format III
+                # ---------------------------------------------------------
+                # 15 14 13 | 12 11 10 | 09 08 07 | 06 | 05 04 | 03 02 01 00
+                # Opcode   | C        | 10-bit PC Offset
+                # ---------------------------------------------------------
+                # Okay we have the opcode+C, so now all we have to do is get
+                # the offset.
+
+                # Check if it's a label
+                if not (self.labels.get(instruction[curr_i]) is None):
+                    addr = self.labels.get(instruction[curr_i])[2:].upper().zfill(4)
+                    x_const = ''.join([addr[2:],addr[:2]]).zfill(4)
+                    word_1.append(x_const)
+
+
+            if isinstance(word_0[0],list):
+                word_0, = word_0
+                tmp_emu = Template(word_0[1])
+                emu = tmp_emu.substitute(dst=instruction[length-1])
+                emu = emu.split()
+                return self.__decode_instruction(emu,ind)
+
+            bin_result = ''.join(word_0)
+            full_instruction = str(hex(int(bin_result,2)))[2:].upper().zfill(4)
+            full_instruction = full_instruction[2:]+full_instruction[:2]
+            if word_1:
+                full_instruction += ' '
+                full_instruction += ''.join(word_1)
+            if word_2:
+                full_instruction += ' '
+                full_instruction += ''.join(word_2)
+
+            return full_instruction
+    
+    # First pass of the assemblern
+    def __first_pass(self,code):
+        last_was_org = False
+        for i,line in enumerate(code):
+            line = line.replace(':','')
+            line.strip()
+            instruction = line.split()
+            # print(instruction)
+            try:
+                self.col_3[i] = line.strip()
+                # Now check if the last address was defined
+                if not (i==0):
+                    logger.debug('Checking if last address was defined')
+                    if last_was_org:
+                        logger.debug('Last instruction was ORG directive. Setting address to {}.'.format(self.orgs[-1]))
+                        self.col_1[i] = self.orgs[-1]
+                        last_was_org = False
+                    elif (not self.col_1[i-1] and self.orgs):
+                        logger.debug('Last address was not defined, setting to whatever is in ORGs.')
+                        self.col_1[i] = self.orgs[-1]
+                    # If the last address was defined, set it to that for now
+                    elif (self.col_1[i-1] and not self.col_1[i]):
+                        logger.debug('Last address is defined. Setting current address to that for now.')
+                        self.col_1[i] = self.col_1[i-1]
+
+                    
+                # First find the assembler directive ORG
+                if instruction[0] == 'ORG':
+                    last_was_org = True
+                    # Address will be in the next element in the list
+                    self.col_1[i] = instruction[1]
+                    logger.debug('Found ORG directive, line {}, address {}'.format(i,self.col_1[i]))
+                    # Go ahead and store the line number while we're
+                    # here
+                    self.col_0[i] = i
+
+                    # There's no other fields that should be filled
+                    # right of this for assembler directives, so fill
+                    # with whitespace
+                    self.col_2[i] = ''
+                    self.col_4[i] = ''
+                    self.col_5[i] = ''
+                    # Store the last place the ORG was defined
+                    self.orgs_i.append(i)
+                    self.orgs.append(self.col_1[i])
+                    continue
+                    
+                elif not self.__convert_to_opcode(instruction[0]) is None:
+                    logger.debug('Recognized an opcode ({}). Not encoding it for the first pass.'.format(instruction[0]))
+                    # Now to determine if this was emulated or not
+                    tmp = self.__convert_to_opcode(instruction[0])
+                    offset = 0
+                    # I can't just add 2 every time. It needs to know how much to add.
+                    self.col_1[i+1] = hex(int(str(self.col_1[i]),0)+2)
+                    # logger.critical('Immediately added 2 before processing further.')
+                    # logger.critical('Next address is: {}'.format(self.col_1[i+1]))
+                    if isinstance(tmp,list):
+                        # logger.critical('{} is an emulated instruction: {}'.format(instruction[0],tmp))
+                        # This is an emulated instruction
+                        offset = int(tmp[0])
+                        
+                    # Now to determine how much we need to increment the address counter by
+                    if '#0x' in instruction:
+                        self.col_1[i+1] = hex(int(str(self.col_1[i+1]),0)+2)
+                    if '&' in instruction:
+                        self.col_1[i+1] = hex(int(str(self.col_1[i+1]),0)+2)
+                        
+                    self.col_1[i+1] = hex(int(str(self.col_1[i+1]),0)+offset)
+                    self.col_1[i+1] = '0x'+str(self.col_1[i+1])[2:].zfill(4)
+                    continue
+                
+                elif instruction[0][0] == ';':
+                    logger.debug('Found comment at line {}'.format(i))
+                    if not(i==0):
+                        if self.col_1[i] is None:
+                            logger.debug('Previous address was None. Likely a header comment. Continuing for now.')
+                            continue
+                        else:
+                            self.col_1[i+1] = self.col_1[i]
+                            continue
+                    else:
+                        if not(i==(len(code)-1)):
+                            logger.debug('Storing previous val of {} into old val {} (line {})'.format(self.col_1[i-1],self.col_1[i]),i)
+                            self.col_1[i+1] = self.col_1[i]
+                            continue
+                        else:
+                            logger.debug('No found previous value. Continuing.')
+                            continue
+                    
+                # If the first part of the instruction did not match any of these then
+                # it must be a label
+                else:
+                    logger.debug('No other matches so far for instruction {}'.format(instruction[0]))
+                    # Is this a directive?
+                    if not (i==0):
+                        if not Directives.get(instruction[0]) is None:
+                            continue
+                            
+                        if self.labels.get(instruction[0]) is None:
+                            try:
+                                check = self.__check_valid_label(instruction[0])
+                                logger.debug('Found new label: {} (line {})'.format(instruction[0],i))
+                                self.labels[instruction[0]] = self.col_1[i]
+                                self.col_1[i+1] = self.col_1[i]
+                                was_label = True
+                            except InvalidLabelError:
+                                logger.debug('Found invalid label {} (line {})'.format(instruction[0],i))
+                                invkey = 'errINV'+instruction[0]
+                                self.labels[invkey] = self.col_1[i]
+                                was_label = True
+
+                                pass
+                        else:
+                            if self.labels.get(instruction[0]) == self.col_1[i]:
+                                pass
+                            else:
+                                logger.debug('Found duplicate label {} (line {})'.format(instruction[0],i))
+                                dupkey = 'errDUP'+instruction[0]
+                                self.labels[dupkey] = self.col_1[i]
+                                was_label = True
+                    else:
+                        # Must be a label?
+                        logger.debug('I guess this is a label?')
+                        if self.labels.get(instruction[0]) is None:
+                            self.labels[instruction[0]] = self.col_1[0]
+                            was_label = True
+                        else:
+                            dupkey = 'err'+instruction[0]
+                            self.labels[dupkey] = self.col_1[0]
+                            was_label = True
+                        continue
+
+                test_instruction = None
+                try:
+                    test_instruction = self.__convert_to_opcode(instruction[1])
+                except InvalidInstructionError:
+                    pass
+
+                if not (test_instruction is None):
+                    self.col_1[i+1] = hex(int(str(self.col_1[i]),0)+2)
+                    self.col_1[i+1] = '0x'+str(self.col_1[i+1])[2:].zfill(4)
+
+                # Check if this is a directive
+                elif not ((Directives.get(instruction[0]) is None) and (Directives.get(instruction[1]) is None)):
+                    # Here's where we'll store the offset
+                    offset = 0
+                    # Which one is it?
+                    if (Directives.get(instruction[0]) is None):
+                        offset = Directives.get(instruction[1])
+                    else:
+                        offset = Directives.get(instruction[0])
+
+                    # Is it DS?
+                    # print(offset)
+                    # If we haven't actually found the address, just pass
+                    if (self.col_1[i] is None):
+                        continue
+                    if (offset < 0):
+                        self.col_1[i+1] = hex(int(self.col_1[i],0)+int(instruction[2]))
+                        self.col_1[i+1] = '0x'+str(self.col_1[i+1])[2:].zfill(4)
+                        # Otherwise, add what it's supposed to
+                    else:
+                        # self.col_1[i] = '0x'+str(self.col_1[i])[2:].zfill(4)
+                        # self.col_1[i+1]
+                        self.col_1[i+1] = hex(int(self.col_1[i],0)+offset)
+                        self.col_1[i+1] = '0x'+str(self.col_1[i+1])[2:].zfill(4)
+
+                else:
+                    if not(i==0):
+                        if self.col_1[i-1] is None:
+                            logger.warning('Got to the else, previous address was None.')
+                            continue
+                        else:
+                            logger.debug('No match found for {}, assuming it\'s just whitespace.'.format(instruction))
+                            self.col_1[i+1] = self.col_1[i]
+                            
+                    else:
+                        logger.debug('Must be whitespace on the first line.')
+                        logger.debug('No match found for instruction {} (line {})'.format(instruction[0],i))
+                        logger.debug('Storing previous val of {} into old val {}'.format(self.col_1[i-1],self.col_1[i]))
+                        self.col_1[i+1] = self.col_1[i]
+                        continue
+                was_label=False
+                    
+            except IndexError as err:
+                logger.debug('Ignoring this error: %s' % err)
+                pass
+
+        logger.info(pprint.pformat(self.labels))
+        # Set the starting address as the first ORG directive
+        for i,address in enumerate(self.col_1):
+            if address is None:
+                self.col_1[i] = self.orgs[0]
+            else:
+                break
+
+        for label, addr in self.labels.items():
+            # The only way for it to be None is if it came before the directive
+            if addr is None:
+                self.labels[label] = self.orgs[0]
+            else:
+                continue
+                
+
+    def __second_pass(self,code):
+        was_label = False
+        for i,line in enumerate(code):
+            line = line.replace(':','')
+            instruction = line.split()
+            if self.__get_true_instruction_length(instruction) <= 0:
+                continue
+            else:
+                try:
+                    self.col_2[i] = self.__decode_instruction(instruction,i)
+                    # print(self.col_2[i])
+                except IndexError:
+                    break
+
+    def parse_asm(self):
+        try:
+            with open(self.args.asm) as asm:
+                code = asm.readlines()
+                self.__get_size(code)
+                logger.info('Determined there are {} lines of code'.format(self.size))
+                self.__init_cols()
+                self.__first_pass(code)
+                self.__second_pass(code)
+                
+        except FileNotFoundError:
+            logger.critical('Could not open file %s' % self.args.asm)
+            exit()
+
+    def write_obj(self):
+        obj = 'VictoriaRodriguez'
+        num_bytes = 0
+        bytes_words_used = []
+        for i,org in enumerate(self.orgs):
+            try:
+                num_bytes=0
+                bytes_words_used = []
+
+                # Find the labels in this address segment
+                for label,addr in self.labels.items():
+                    if int(addr,16) < int(self.col_1[self.orgs_i[i+1]],16) and int(addr,16) > int(self.col_1[self.orgs_i[i]],16):
+                        bytes_words_used.append(addr[2:].upper().zfill(4))
+                        num_bytes += 2
+                    elif addr == self.orgs[i+1]:
+                        break
+                    else:
+                        continue
+
+                num_bytes = hex(int(num_bytes))[2:].upper().zfill(4)
+
+                obj += ('FF00AA55'
+                        '%s'    # First address in this segment
+                        '%s'    # Two bytes with number of bytes used in this addr seg
+                        %
+                        (self.orgs[i][2:],
+                         num_bytes))
+
+                for byte_word_used in bytes_words_used:
+                    obj += byte_word_used
+                
+            except IndexError:
+                break
+
+        obj += 'FF00AA55'
+        fname = self.args.asm[:-4]+'.txt'
+        with open(fname,'w+') as f:
+            f.write(obj)
+            
+        # print(obj)
+
+    def write_mem(self):
+        logger.debug('Writing memory file...')
+        for label,addr in sorted(self.labels.items()):
+            try:
+                if label.startswith('err'):
+                    logger.error('Error with label {}'.format(label[6:]))
+                    err_labels[label] = addr[2:].upper()
+                    exit(-1)
+                # logger.critical(pprint.pformat(err_labels))
+            except TypeError as err:
+                logger.warning('Received this error when writing the symbol table: {}'.format(err))
+                pass
+        
+        f_lines = ''
+        for i in range(self.size):
+            try:
+                # full_instruction = full_instruction[2:]+full_instruction[:2]
+                # instr = self.col_2[i]+'.'[:-1]
+                instr_full = self.col_2[i].replace(' ','')
+                instr_1 = instr_full[:4]
+                instr_2 = None
+                instr_3 = None
+                if len(instr_full) > 4:
+                    instr_2 = instr_full[4:8]
+                    if len(instr_full) > 8:
+                        instr_3 = instr_full[8:]
+                    
+                # mem_instr = instr[i][2:]+instr[i][:2]
+                # print(instr_full)
+                # print(instr_1)
+                # f_lines += f'{self.col_2[i]} // {self.col_3[i]}\n'
+                if instr_full:
+                    f_lines += f'{instr_1[:2]} {instr_1[2:]} '
+                    if not instr_2 is None:
+                        f_lines += f'{instr_2[:2]} {instr_2[2:]} '
+                    if not instr_3 is None:
+                        f_lines += f'{instr_3[:2]} {instr_3[2:]} '
+                        
+            except TypeError as err:
+                logger.warning(err)
+                continue
+            except IndexError as err:
+                break
+            
+        with open(f'{self.args.asm[:-4]}.mem','w+') as f:
+            f_lines = [f'\n{x}' if (((i%10)==0) and i>0) else f'{x}' for i,x in enumerate(f_lines.split())]
+            ff_lines = ' '.join(f_lines)
+            f.write(ff_lines)
+            
+
+    def write_list(self):
+        logger.debug('Writing list file...')
+        f_lines = ''
+        symb_tab = '%-50s %-50s\n' %('Label','Value')
+        err_labels = {}
+        symb_err = '{:^55}\n'.format('ERRORS:')
+        symb_err += '%-20s %-20s %-20s\n' %('Label','Value','Problem')
+        for i in range(self.size):
+            try:
+            # Write out the LIST file
+                addr = self.col_1[i][2:].upper()
+                # logger.info('Address is %s' % addr)
+                f_lines += '%-10s %-10s %-20s %-30s\n' % (i,addr,self.col_2[i],self.col_3[i])
+            except TypeError:
+                logger.warning('Column contains NoneType')
+                continue
+            
+        for label,addr in sorted(self.labels.items()):
+            try:
+                if not label.startswith('err'):
+                    pretty_addr = addr[2:].upper()
+                    symb_tab += '%-50s %-50s\n' % (label,pretty_addr)
+                else:
+                    logger.error('Error with label {}'.format(label[6:]))
+                    err_labels[label] = addr[2:].upper()
+                    continue
+                # logger.critical(pprint.pformat(err_labels))
+            except TypeError as err:
+                logger.warning('Received this error when writing the symbol table: {}'.format(err))
+                pass
+
+        # print(pprint.pformat(err_labels))
+        if err_labels:
+            # logger.critical('got to here')
+            for err,val in sorted(err_labels.items()):                                    
+                label = err[3:]
+                prob = label[:3]
+                if prob == 'INV':
+                    prob = 'INVALID CHARS'
+                elif prob == 'DUP':
+                    prob = 'DUPLICATE'
+                addr = val.upper()
+                symb_err += '%-20s %-20s %-20s\n' % (label[3:],addr,prob)
+
+        if self.args.list_file is None:
+            try:
+                fname = self.args.asm[:-4]+'.lst'
+                with open(fname,'w+') as f:
+                    lines = f_lines+'\n\n\n\n'+symb_tab
+                    if err_labels:
+                        lines += '\n\n'+symb_err
+                    elif self.args.obj:
+                        self.write_obj()
+                    f.writelines(lines)
+                logger.debug('Wrote to file')
+            except FileNotFoundError:
+                logger.critical('Could not open list file')
+        else:
+            try:
+                with open(self.args.list_file,'w+') as f:
+                    lines = f_lines+'\n\n\n\n'+symb_tab
+                    if err_labels:
+                        lines += '\n\n'+symb_err
+                    elif self.args.obj:
+                        self.write_obj()
+                    f.writelines(lines)
+            except FileNotFoundError:
+                logger.critical('Path to list does not exist')
+
+parser = argparse.ArgumentParser(description='Baby assembler that produces LIST file for a subset of the MSP430 instructions')
+parser.add_argument('asm',help='assembly file for the assembler to parse',metavar='asm_file')
+parser.add_argument('--list_file',help='path to list file')
+parser.add_argument('-v','--verbose',help='outputs logging to console',nargs='?',default='WARNING',metavar='LOG LEVEL',choices=['DEBUG','debug','INFO','info','WARNING','warning','ERROR','error','CRITICAL','critical'])
+parser.add_argument('-m','--mem',help='write mem file for Verilog',action='store_true')
+parser.add_argument('-l','--list',help='write list file',action='store_true')
+parser.add_argument('-o','--obj',help='write object file',action='store_true')
+args = parser.parse_args()
+
+try:
+    exec(f'logger.setLevel(logging.{args.verbose.upper()})')
+except AttributeError:
+    logger.setLevel(logging.WARNING)
+
+# set a format which is simpler for console use
+formatter = logging.Formatter('%(name)-12s: %(levelname)-8s %(message)s')
+# tell the handler to use this format
+log_cmd.setFormatter(formatter)
+logger.debug('Set log level for console.')
+    
+
+mspasm = BabyAssembler(args)
+mspasm.parse_asm()
+if (args.list):
+    mspasm.write_list()
+if (args.obj):
+    mspasm.write_obj()
+if (args.mem):
+    mspasm.write_mem()
+
+# Lambda magic executes the function if the option is selected
+
+# map((lambda x:{args.mem:mspasm.write_mem,args.list:mspasm.write_list,args.obj:mspasm.write_obj}.get(x)()(x)),[args.mem,args.list,args.obj])
+# [(lambda x:{args.mem:mspasm.write_mem,args.list:mspasm.write_list,args.obj:mspasm.write_obj}.get(x)())(x) for x in [
+
